@@ -47,7 +47,6 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 
 ### Curto prazo
 - [ ] Suíte de testes automatizados para o motor de scoring (`CryptoAnalyzer.analyze_dataframe`) — cada fator da matriz coberto por um teste unitário com DataFrames sintéticos
-- [ ] Notificações Discord/webhook genérico, além do Telegram já implementado
 - [ ] Trocar o polling do dashboard web (20s) por WebSocket para atualização push em tempo real
 
 ### Médio prazo
