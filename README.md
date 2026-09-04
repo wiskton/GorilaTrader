@@ -212,6 +212,21 @@ pytest -v tests/test_scoring_matrix.py   # só a matriz de confluência, com nom
 
 ---
 
+## 📈 Backtest
+
+Roda a matriz de decisão contra histórico real (Binance) para medir se ela teria funcionado, sem nenhum vazamento de dados futuros - em cada barra, o sinal só enxerga candles até aquele ponto; a posição é resolvida depois olhando os candles seguintes de verdade (ver docstring de `backtest.py` para a metodologia completa, incluindo a regra conservadora de desempate quando Stop e alvo são tocados na mesma barra).
+
+```bash
+python3 gorilatrader.py --backtest BTC
+python3 gorilatrader.py --backtest ETH --backtest-days 90
+```
+
+Mostra taxa de acerto, R médio (retorno normalizado pelo risco) e retorno % por direção (COMPRA/VENDA), além da lista das últimas entradas com preço/resultado. Útil para comparar diferentes `weights` em `config.json` antes de usar em conta real - o backtest já lê os pesos configurados.
+
+⚠️ É uma ferramenta de análise histórica, não uma promessa de resultado futuro - custos de execução (spread, slippage, taxas) não são simulados.
+
+---
+
 ## 🐳 Docker (monitoramento 24/7 num servidor/VPS)
 
 A imagem roda o **dashboard web** (`--serve`, que também dispara os alertas) - o modo terminal com apito/voz depende de dispositivos de áudio do host e não faz sentido num container headless.
@@ -241,7 +256,8 @@ GorilaTrader/
 ├── gorilatrader.py         # Motor de análise + dashboard no terminal (Rich)
 ├── webserver.py            # Backend do dashboard web (FastAPI + WebSocket) - reaproveita o motor acima
 ├── web/index.html          # Frontend do dashboard web (Lightweight Charts, sem build step)
-├── tests/                  # Suíte pytest (matriz de confluência, config, Telegram, histórico)
+├── backtest.py             # Motor de backtest (--backtest) sobre histórico real da Binance
+├── tests/                  # Suíte pytest (matriz de confluência, backtest, config, Telegram, histórico)
 ├── Dockerfile / docker-compose.yml / .dockerignore  # Empacotamento para servidor/VPS
 ├── run.sh                  # Inicia o dashboard no terminal (abre terminal se clicado fora de um)
 ├── run-web.sh              # Inicia o dashboard web e abre o navegador

@@ -1305,8 +1305,40 @@ def main():
         default="127.0.0.1",
         help="Endereço de bind do dashboard web ao usar --serve (padrão: 127.0.0.1, use 0.0.0.0 para acesso na rede)",
     )
+    parser.add_argument(
+        "--backtest",
+        metavar="ATIVO",
+        help="Roda um backtest da matriz de decisão para o ativo informado (ex.: BTC) e encerra",
+    )
+    parser.add_argument(
+        "--backtest-days",
+        type=int,
+        default=60,
+        help="Quantos dias de histórico (candles de 1h) usar no --backtest (padrão: 60)",
+    )
 
     args = parser.parse_args()
+
+    if args.backtest:
+        console = Console()
+        key = args.backtest.upper()
+        if key not in ASSETS:
+            console.print(f"[red]❌ Ativo desconhecido: {key}. Disponíveis: {', '.join(ASSETS)}[/red]")
+            return
+        try:
+            from backtest import print_backtest_report, run_backtest
+        except ImportError as exc:
+            console.print(f"[red]❌ Dependência ausente para o backtest: {exc}[/red]")
+            return
+        console.print(f"[bold yellow]📊 Rodando backtest de {key} ({args.backtest_days} dias de histórico)...[/bold yellow]")
+        try:
+            trades, summary = run_backtest(key, ASSETS[key], days=args.backtest_days, weights=WEIGHTS)
+        except Exception as exc:
+            logger.exception("Falha ao rodar backtest de %s", key)
+            console.print(f"[red]❌ Falha ao rodar o backtest: {exc}[/red]")
+            return
+        print_backtest_report(console, key, ASSETS[key], trades, summary)
+        return
 
     if args.serve:
         try:

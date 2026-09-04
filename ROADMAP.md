@@ -60,10 +60,19 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 
 ---
 
+## ✅ v1.5 — Backtest (entregue)
+
+- [x] `backtest.py`: motor de backtest sem look-ahead - cada sinal só enxerga candles até aquele ponto (`df.iloc[:i+1]`), reaproveitando `CryptoAnalyzer.analyze_dataframe` direto
+- [x] `fetch_extended_klines`: paginação sobre o limite de 1000 candles/request da Binance, para períodos maiores (`--backtest-days`)
+- [x] Resolução de trade contra STOP/TP1/TP2 com regra conservadora de desempate (STOP primeiro se ambos tocam na mesma barra) e timeout configurável
+- [x] `python3 gorilatrader.py --backtest ATIVO [--backtest-days N]` com relatório de taxa de acerto, R médio e retorno % por direção (COMPRA/VENDA)
+- [x] 12 testes cobrindo resolução de trade (SL/TP1/TP2/timeout/desempate) e paginação do histórico - um deles pegou um bug real de sobreposição de trades antes de ir para o ar (o loop principal nunca pulava para depois da resolução da entrada anterior)
+
+---
+
 ## 🚧 Próximos Passos
 
 ### Médio prazo
-- [ ] Modo de backtest: rodar a matriz de decisão contra dados históricos e medir taxa de acerto/retorno por sinal
 - [ ] Filtro de confirmação multi-timeframe (ex.: viés de 4h/1D para filtrar sinais de 1h contra a tendência maior)
 - [ ] Sombreamento visual entre as bandas (Bollinger/Donchian/Nuvem de Ichimoku) no gráfico web, hoje são só linhas
 

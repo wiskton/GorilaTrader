@@ -46,7 +46,13 @@ def build_df(
     if tail_vols is not None:
         vols[-len(tail_vols):] = tail_vols
 
-    return pd.DataFrame({"open": opens, "high": highs, "low": lows, "close": closes, "vol": vols})
+    # timestamps sintéticos (candles de 1h) - só usados por quem precisa deles
+    # (ex.: o motor de backtest); analyze_dataframe não toca nesta coluna.
+    open_time = np.arange(n, dtype="int64") * 3600_000
+
+    return pd.DataFrame({
+        "open_time": open_time, "open": opens, "high": highs, "low": lows, "close": closes, "vol": vols,
+    })
 
 
 @pytest.fixture
