@@ -108,8 +108,6 @@
 <footer>Dados: Binance / Bybit (fallback) · Atualiza automaticamente · Não constitui recomendação de investimento</footer>
 
 <script>
-const REFRESH_MS = 20000;
-
 const OVERLAYS = [
   { key: 'ema9',   label: 'EMA 9',   color: '#ffd166', kind: 'line', dashed: false },
   { key: 'ema21',  label: 'EMA 21',  color: '#06d6a0', kind: 'line', dashed: false },
@@ -128,6 +126,7 @@ let assets = {};
 let currentKey = null;
 let overlayState = { ...DEFAULT_ON };
 let oscMode = 'rsi';
+let lastChartData = null;
 
 let mainChart, candleSeries, volumeSeries;
 let overlaySeries = {}; // key -> series or {a, b} for bands/ichimoku
@@ -245,14 +244,12 @@ function buildTabs() {
 function switchAsset(key) {
   currentKey = key;
   buildTabs();
-  loadChart();
-  loadSnapshot();
+  lastChartData = null;
+  connectWebSocket(key);
 }
 
-async function loadChart() {
-  const res = await fetch(`/api/chart/${currentKey}`);
-  if (!res.ok) { setStatus('erro ao carregar gráfico', true); return; }
-  const data = await res.json();
+function applyChart(data) {
+  lastChartData = data;
 
   candleSeries.setData(data.candles);
   volumeSeries.setData(data.volume);
@@ -275,7 +272,6 @@ async function loadChart() {
 
   updateOscillator(data);
   mainChart.timeScale().fitContent();
-  setStatus(`atualizado ${new Date().toLocaleTimeString('pt-BR')}`);
 }
 
 function clearOscSeries() {
@@ -308,10 +304,7 @@ function updateOscillator(data) {
   }
 }
 
-async function loadSnapshot() {
-  const res = await fetch(`/api/snapshot/${currentKey}`);
-  if (!res.ok) return;
-  const d = await res.json();
+function applySnapshot(d) {
   const cfg = assets[currentKey];
 
   document.getElementById('assetName').textContent = `${cfg.icon} ${currentKey} · ${cfg.name}`;
@@ -358,13 +351,47 @@ function setStatus(msg, isError) {
   el.style.color = isError ? 'var(--red)' : 'var(--muted)';
 }
 
-async function refreshLoop() {
-  try {
-    await loadChart();
-    await loadSnapshot();
-  } catch (e) {
-    setStatus('erro ao atualizar: ' + e, true);
-  }
+// --- WebSocket: substitui o polling por push do servidor (ver /ws/{key} em webserver.py) ---
+let ws = null;
+let wsGeneration = 0;      // invalida timers de reconexão de conexões antigas ao trocar de ativo
+let reconnectTimer = null;
+
+function connectWebSocket(key) {
+  wsGeneration += 1;
+  const myGeneration = wsGeneration;
+
+  if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  setStatus('conectando...');
+  ws = new WebSocket(`${scheme}://${location.host}/ws/${key}`);
+
+  ws.onmessage = (event) => {
+    if (myGeneration !== wsGeneration) return; // conexão obsoleta (trocou de ativo)
+    const msg = JSON.parse(event.data);
+    if (msg.key !== currentKey) return;
+
+    if (msg.chart) applyChart(msg.chart);
+    if (msg.snapshot) applySnapshot(msg.snapshot);
+
+    const time = new Date().toLocaleTimeString('pt-BR');
+    if (msg.chart_error || msg.snapshot_error) {
+      setStatus(`⚠ ${msg.chart_error || msg.snapshot_error} · ${time}`, true);
+    } else {
+      setStatus(`🟢 ao vivo · atualizado ${time}`);
+    }
+  };
+
+  ws.onclose = () => {
+    if (myGeneration !== wsGeneration) return; // já trocamos de ativo, ignora
+    setStatus('conexão perdida - reconectando em 3s...', true);
+    reconnectTimer = setTimeout(() => connectWebSocket(currentKey), 3000);
+  };
+
+  ws.onerror = () => {
+    try { ws.close(); } catch (e) {}
+  };
 }
 
 async function init() {
@@ -376,13 +403,12 @@ async function init() {
   buildOverlayToolbar();
   buildCharts();
 
-  document.getElementById('oscSelect').addEventListener('change', async (e) => {
+  document.getElementById('oscSelect').addEventListener('change', (e) => {
     oscMode = e.target.value;
-    await loadChart();
+    if (lastChartData) updateOscillator(lastChartData);
   });
 
-  await refreshLoop();
-  setInterval(refreshLoop, REFRESH_MS);
+  connectWebSocket(currentKey);
 }
 
 init();

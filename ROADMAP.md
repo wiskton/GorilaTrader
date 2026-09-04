@@ -41,13 +41,16 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] `run-web.sh` + atalho **GorilaTrader Web** no menu de aplicativos (sobe o servidor e abre o navegador automaticamente)
 - [x] `install-desktop.sh` + templates em `desktop/` - instala os atalhos (terminal e web) resolvendo os caminhos automaticamente, funciona em qualquer máquina/usuário sem editar nada à mão
 
+## ✅ v1.3 — Testes Automatizados e WebSocket (entregue)
+
+- [x] Suíte de testes automatizados (`tests/`, pytest) para o motor de scoring - os 15 fatores da matriz de confluência testados isoladamente (score exato + texto da razão) via cenários sintéticos calibrados, mais testes de integração (classificação de sinal, direção de SL/TP, regressão da EMA200), config, Telegram e persistência do histórico - 57 testes no total
+- [x] `CryptoAnalyzer.analyze_dataframe` aceita DataFrame direto (sem rede), o que tornou os testes possíveis
+- [x] `requirements-dev.txt` + `pytest.ini`
+- [x] Dashboard web trocou o polling (20s) por **WebSocket** (`/ws/{ativo}`) - o servidor empurra gráfico + snapshot periodicamente, com reconexão automática no frontend se a conexão cair
+
 ---
 
 ## 🚧 Próximos Passos
-
-### Curto prazo
-- [ ] Suíte de testes automatizados para o motor de scoring (`CryptoAnalyzer.analyze_dataframe`) — cada fator da matriz coberto por um teste unitário com DataFrames sintéticos
-- [ ] Trocar o polling do dashboard web (20s) por WebSocket para atualização push em tempo real
 
 ### Médio prazo
 - [ ] Modo de backtest: rodar a matriz de decisão contra dados históricos e medir taxa de acerto/retorno por sinal

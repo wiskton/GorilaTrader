@@ -165,7 +165,7 @@ python3 gorilatrader.py --test-telegram
 python3 gorilatrader.py --serve
 # abre em http://127.0.0.1:8000
 ```
-Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Charts](https://github.com/tradingview/lightweight-charts), open-source da própria TradingView) com overlays configuráveis (EMA9/21/50/200, Bandas de Bollinger, Canal Donchian, Nuvem de Ichimoku) e um painel de oscilador (RSI/MACD/OBV) sincronizado. A barra lateral mostra sinal, score, Stop Loss/Take Profits e os fatores técnicos do ativo selecionado - atualiza sozinho a cada 20s. Use `--port` para trocar a porta e `--host 0.0.0.0` para acessar de outro dispositivo na rede.
+Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Charts](https://github.com/tradingview/lightweight-charts), open-source da própria TradingView) com overlays configuráveis (EMA9/21/50/200, Bandas de Bollinger, Canal Donchian, Nuvem de Ichimoku) e um painel de oscilador (RSI/MACD/OBV) sincronizado. A barra lateral mostra sinal, score, Stop Loss/Take Profits e os fatores técnicos do ativo selecionado. A atualização é via **WebSocket** (`/ws/{ativo}`) - o servidor empurra gráfico + snapshot a cada ~20s sem o navegador precisar ficar re-consultando a API, com reconexão automática se a conexão cair. Use `--port` para trocar a porta e `--host 0.0.0.0` para acessar de outro dispositivo na rede.
 
 Ou clique no atalho **GorilaTrader Web** no menu de aplicativos (veja abaixo) - ele sobe o servidor e já abre o navegador automaticamente:
 ```bash
@@ -199,18 +199,32 @@ O script resolve os caminhos automaticamente a partir de onde o projeto foi clon
 
 ---
 
+## 🧪 Testes Automatizados
+
+O motor de scoring (`CryptoAnalyzer.analyze_dataframe`) tem uma suíte de testes que isola cada um dos 15 fatores da matriz de confluência (zera todos os pesos exceto o fator sob teste, com um cenário sintético calibrado para disparar exatamente aquela condição) - além de testes de integração (classificação de sinal, direção de SL/TP, uma regressão para o bug histórico da EMA200), config, Telegram e persistência do histórico.
+
+```bash
+pip install -r requirements-dev.txt
+pytest                 # roda toda a suíte (tests/)
+pytest -v tests/test_scoring_matrix.py   # só a matriz de confluência, com nomes de cada caso
+```
+
+---
+
 ## 📂 Estrutura do Projeto
 
 ```
 GorilaTrader/
 ├── gorilatrader.py         # Motor de análise + dashboard no terminal (Rich)
-├── webserver.py            # Backend do dashboard web (FastAPI) - reaproveita o motor acima
+├── webserver.py            # Backend do dashboard web (FastAPI + WebSocket) - reaproveita o motor acima
 ├── web/index.html          # Frontend do dashboard web (Lightweight Charts, sem build step)
+├── tests/                  # Suíte pytest (matriz de confluência, config, Telegram, histórico)
 ├── run.sh                  # Inicia o dashboard no terminal (abre terminal se clicado fora de um)
 ├── run-web.sh              # Inicia o dashboard web e abre o navegador
 ├── install-desktop.sh      # Instala os atalhos no menu de aplicativos
 ├── desktop/                # Templates dos atalhos .desktop (usados pelo install-desktop.sh)
 ├── requirements.txt        # Dependências Python
+├── requirements-dev.txt    # + pytest, só para desenvolvimento
 ├── config.example.json     # Modelo de configuração (copie para config.json)
 ├── gorilatrader.png        # Ícone pixel art do app
 ├── ROADMAP.md               # Próximos passos planejados

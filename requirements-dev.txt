@@ -1,0 +1,3 @@
+# Dependências apenas para rodar a suíte de testes (não necessárias em produção)
+-r requirements.txt
+pytest>=7.4.0

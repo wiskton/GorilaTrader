@@ -9,19 +9,21 @@ Rode com:
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 from typing import List, Optional
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from gorilatrader import ASSETS, CryptoAnalyzer, logger
+from gorilatrader import ASSETS, CryptoAnalyzer, MarketData, logger
 
 app = FastAPI(title="GorilaTrader Web")
 
 BAR_SECONDS = 3600  # candles de 1h
+WS_INTERVAL_SECONDS = 20  # cadência de push do WebSocket, mesma ordem do terminal
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
 
@@ -153,14 +155,7 @@ def api_chart(key: str):
         raise HTTPException(status_code=500, detail="Erro interno ao calcular indicadores")
 
 
-@app.get("/api/snapshot/{key}")
-def api_snapshot(key: str):
-    key = key.upper()
-    if key not in ASSETS:
-        raise HTTPException(status_code=404, detail="Ativo desconhecido")
-    item = CryptoAnalyzer.analyze_asset(key, ASSETS[key])
-    if item is None:
-        raise HTTPException(status_code=502, detail="Falha ao obter dados (veja gorilatrader.log)")
+def snapshot_payload(item: MarketData) -> dict:
     return {
         "price": item.price,
         "change_1h": item.change_1h,
@@ -178,6 +173,67 @@ def api_snapshot(key: str):
         "bb_zscore": item.bb_zscore,
         "reasons": item.reasons,
     }
+
+
+@app.get("/api/snapshot/{key}")
+def api_snapshot(key: str):
+    key = key.upper()
+    if key not in ASSETS:
+        raise HTTPException(status_code=404, detail="Ativo desconhecido")
+    item = CryptoAnalyzer.analyze_asset(key, ASSETS[key])
+    if item is None:
+        raise HTTPException(status_code=502, detail="Falha ao obter dados (veja gorilatrader.log)")
+    return snapshot_payload(item)
+
+
+@app.websocket("/ws/{key}")
+async def ws_updates(websocket: WebSocket, key: str):
+    """Empurra gráfico + snapshot a cada WS_INTERVAL_SECONDS, substituindo o
+    polling do frontend. As chamadas de rede (fetch_klines/analyze_asset) são
+    síncronas e bloqueantes, então rodam em thread separada (asyncio.to_thread)
+    para não travar outras conexões no mesmo processo."""
+    key = key.upper()
+    if key not in ASSETS:
+        await websocket.close(code=1008)
+        return
+
+    config = ASSETS[key]
+    await websocket.accept()
+
+    try:
+        while True:
+            chart, chart_error = None, None
+            try:
+                chart = await asyncio.to_thread(build_chart_payload, key, config)
+            except HTTPException as exc:
+                chart_error = exc.detail
+            except Exception:
+                logger.exception("Falha ao montar payload do gráfico (WS) para %s", key)
+                chart_error = "Erro interno ao calcular indicadores"
+
+            snapshot, snapshot_error = None, None
+            try:
+                item = await asyncio.to_thread(CryptoAnalyzer.analyze_asset, key, config)
+                if item is None:
+                    snapshot_error = "Falha ao obter dados (veja gorilatrader.log)"
+                else:
+                    snapshot = snapshot_payload(item)
+            except Exception:
+                logger.exception("Falha ao montar snapshot (WS) para %s", key)
+                snapshot_error = "Erro interno ao calcular indicadores"
+
+            await websocket.send_json({
+                "type": "update",
+                "key": key,
+                "chart": chart,
+                "chart_error": chart_error,
+                "snapshot": snapshot,
+                "snapshot_error": snapshot_error,
+            })
+
+            await asyncio.sleep(WS_INTERVAL_SECONDS)
+    except WebSocketDisconnect:
+        pass
 
 
 @app.get("/", response_class=HTMLResponse)
