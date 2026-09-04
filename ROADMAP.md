@@ -30,6 +30,15 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Alerta dedicado de **Rompimento Forte de Bollinger** (>= 2.5 desvios-padrão da média de 20 períodos)
 - [x] Notificações no **Telegram** para todos os avisos (sinais + RSI estourado + Bollinger forte), com `--test-telegram` e `--no-telegram`
 
+## ✅ v1.2 — Dashboard Web estilo TradingView (entregue)
+
+- [x] Backend `webserver.py` (FastAPI) reaproveitando `CryptoAnalyzer` - endpoints `/api/assets`, `/api/chart/{key}` (candles + todas as séries de indicadores) e `/api/snapshot/{key}` (sinal/score/SL-TP/motivos)
+- [x] Frontend `web/index.html` com [Lightweight Charts](https://github.com/tradingview/lightweight-charts) (open-source da própria TradingView) - candles + volume, sem build step
+- [x] Overlays configuráveis via checkbox: EMA9/21/50/200, Bandas de Bollinger, Canal Donchian, Nuvem de Ichimoku (projetada 26 períodos à frente, como no Ichimoku tradicional)
+- [x] Painel de oscilador sincronizado (RSI com linhas de referência 20/30/70/80, MACD histograma+linhas, ou OBV), selecionável por dropdown
+- [x] Barra lateral com sinal atual, score, Stop Loss/Take Profits e fatores técnicos, atualizando junto com o gráfico
+- [x] `python3 gorilatrader.py --serve [--port 8000] [--host 0.0.0.0]`, dependências opcionais (`fastapi`, `uvicorn`) só exigidas ao usar `--serve`
+
 ---
 
 ## 🚧 Próximos Passos
@@ -37,23 +46,18 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 ### Curto prazo
 - [ ] Suíte de testes automatizados para o motor de scoring (`CryptoAnalyzer.analyze_dataframe`) — cada fator da matriz coberto por um teste unitário com DataFrames sintéticos
 - [ ] Notificações Discord/webhook genérico, além do Telegram já implementado
+- [ ] Trocar o polling do dashboard web (20s) por WebSocket para atualização push em tempo real
 
 ### Médio prazo
 - [ ] Modo de backtest: rodar a matriz de decisão contra dados históricos e medir taxa de acerto/retorno por sinal
 - [ ] Filtro de confirmação multi-timeframe (ex.: viés de 4h/1D para filtrar sinais de 1h contra a tendência maior)
 - [ ] Empacotamento via Docker para facilitar execução em servidores/VPS (monitoramento 24/7 headless)
+- [ ] Sombreamento visual entre as bandas (Bollinger/Donchian/Nuvem de Ichimoku) no gráfico web, hoje são só linhas
 
 ### Longo prazo / explorações
-- [ ] **Dashboard web com gráfico profissional (estilo TradingView)**: servidor local expondo candles + todos os indicadores (EMA, Bollinger, Ichimoku, Donchian) sobrepostos em um gráfico interativo no navegador, com painel para escolher/configurar quais indicadores exibir. Ver seção de design abaixo.
 - [ ] Suporte a mais exchanges como fonte de dados (OKX, Kraken)
 - [ ] Modo "papel" (paper trading) simulando execução das entradas sugeridas para acompanhar performance real da estratégia
-
-### 🖥️ Design planejado do Dashboard Web
-
-Ideia em avaliação para o item acima, ainda não iniciado:
-- **Backend**: um servidor leve em Python (FastAPI) reaproveitando o `CryptoAnalyzer` já existente, expondo os candles + indicadores via REST/WebSocket (push em tempo real, mesmo intervalo do terminal).
-- **Frontend**: gráfico de candles com [Lightweight Charts](https://github.com/tradingview/lightweight-charts) (biblioteca open-source da própria TradingView, MIT) - permite overlays de EMA/Bollinger/Ichimoku/Donchian e um painel lateral para ligar/desligar cada indicador.
-- Roda em paralelo ao terminal (`python3 gorilatrader.py --serve --port 8000`), sem substituir o dashboard atual.
+- [ ] Autenticação simples no dashboard web para uso seguro com `--host 0.0.0.0` fora da rede local
 
 ---
 

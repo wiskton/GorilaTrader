@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GorilaTrader Web</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#11161d; --panel2:#161c25; --border:#232a35;
+    --text:#e6ebf2; --muted:#8a94a6; --green:#00d67a; --red:#ff5a5a;
+    --amber:#ffd166; --cyan:#4cc9f0; --magenta:#f72585; --purple:#8338ec;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  header{display:flex;align-items:center;gap:16px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  header h1{font-size:16px;margin:0;white-space:nowrap;}
+  header h1 .gorilla{margin-right:6px;}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;}
+  .tab{padding:6px 12px;border-radius:6px;background:var(--panel2);border:1px solid var(--border);color:var(--muted);cursor:pointer;font-size:13px;font-weight:600;}
+  .tab.active{background:var(--green);color:#04140c;border-color:var(--green);}
+  .spacer{flex:1;}
+  .status{font-size:12px;color:var(--muted);white-space:nowrap;}
+  .status b{color:var(--text);}
+  main{display:grid;grid-template-columns:1fr 300px;gap:12px;padding:12px;align-items:start;}
+  .chartcol{display:flex;flex-direction:column;gap:10px;min-width:0;}
+  .toolbar{display:flex;gap:14px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;}
+  .toolbar label{display:flex;align-items:center;gap:5px;color:var(--muted);cursor:pointer;user-select:none;}
+  .toolbar label.on{color:var(--text);}
+  .swatch{width:10px;height:10px;border-radius:2px;display:inline-block;}
+  #chart, #osc{background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  #chart{height:460px;}
+  #osc{height:150px;}
+  select{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;}
+  aside{display:flex;flex-direction:column;gap:10px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px;}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px;}
+  .price{font-size:24px;font-weight:700;}
+  .chg{font-size:13px;font-weight:600;margin-left:6px;}
+  .up{color:var(--green);} .down{color:var(--red);}
+  .signal-badge{display:inline-block;padding:6px 10px;border-radius:6px;font-weight:700;font-size:13px;margin:8px 0;}
+  .sig-buy{background:var(--green);color:#04140c;}
+  .sig-sell{background:var(--red);color:#1a0505;}
+  .sig-neutral{background:#3a4150;color:var(--text);}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px dashed var(--border);}
+  .kv span:first-child{color:var(--muted);}
+  .reasons{font-size:12px;color:var(--text);line-height:1.5;margin:0;padding-left:16px;}
+  .reasons li{margin-bottom:4px;}
+  footer{padding:8px 16px;color:var(--muted);font-size:11px;text-align:center;}
+  a{color:var(--cyan);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="gorilla">🦍</span>GorilaTrader Web</h1>
+  <div class="tabs" id="tabs"></div>
+  <div class="spacer"></div>
+  <div class="status" id="status">carregando…</div>
+</header>
+
+<main>
+  <div class="chartcol">
+    <div class="toolbar" id="overlayToolbar"></div>
+    <div id="chart"></div>
+    <div class="toolbar">
+      <span style="color:var(--muted)">Oscilador:</span>
+      <select id="oscSelect">
+        <option value="rsi">RSI (14)</option>
+        <option value="macd">MACD (12,26,9)</option>
+        <option value="obv">OBV</option>
+        <option value="none">Nenhum</option>
+      </select>
+    </div>
+    <div id="osc"></div>
+  </div>
+
+  <aside>
+    <div class="card">
+      <h2 id="assetName">—</h2>
+      <div><span class="price" id="price">—</span><span class="chg" id="chg1h"></span></div>
+      <div class="chg" id="chg24h" style="margin-left:0;color:var(--muted)"></div>
+      <div id="signalBadge" class="signal-badge sig-neutral">—</div>
+      <div class="kv"><span>Score confluência</span><span id="score">—</span></div>
+    </div>
+    <div class="card">
+      <h2>Gerenciamento de Risco</h2>
+      <div class="kv"><span>Stop Loss</span><span id="sl">—</span></div>
+      <div class="kv"><span>Take Profit 1</span><span id="tp1">—</span></div>
+      <div class="kv"><span>Take Profit 2</span><span id="tp2">—</span></div>
+    </div>
+    <div class="card">
+      <h2>Indicadores</h2>
+      <div class="kv"><span>RSI(14)</span><span id="rsiVal">—</span></div>
+      <div class="kv"><span>MACD Hist</span><span id="macdVal">—</span></div>
+      <div class="kv"><span>Canal Donchian(20)</span><span id="channelVal">—</span></div>
+      <div class="kv"><span>OBV</span><span id="obvVal">—</span></div>
+      <div class="kv"><span>Ichimoku</span><span id="ichiVal">—</span></div>
+      <div class="kv"><span>Bollinger (σ)</span><span id="bbVal">—</span></div>
+    </div>
+    <div class="card">
+      <h2>Fatores Técnicos</h2>
+      <ul class="reasons" id="reasons"><li>—</li></ul>
+    </div>
+  </aside>
+</main>
+
+<footer>Dados: Binance / Bybit (fallback) · Atualiza automaticamente · Não constitui recomendação de investimento</footer>
+
+<script>
+const REFRESH_MS = 20000;
+
+const OVERLAYS = [
+  { key: 'ema9',   label: 'EMA 9',   color: '#ffd166', kind: 'line', dashed: false },
+  { key: 'ema21',  label: 'EMA 21',  color: '#06d6a0', kind: 'line', dashed: false },
+  { key: 'ema50',  label: 'EMA 50',  color: '#4cc9f0', kind: 'line', dashed: false },
+  { key: 'ema200', label: 'EMA 200', color: '#f72585', kind: 'line', dashed: false },
+  { key: 'bb',       label: 'Bollinger (20,2)', color: '#c9d1e0', kind: 'band', dashed: true,
+    fields: ['bb_upper', 'bb_lower'] },
+  { key: 'donchian', label: 'Canal Donchian(20)', color: '#4cc9f0', kind: 'band', dashed: true,
+    fields: ['donchian_upper', 'donchian_lower'] },
+  { key: 'ichimoku', label: 'Ichimoku Cloud', color: '#8338ec', kind: 'ichimoku', dashed: false,
+    fields: ['ichimoku_tenkan', 'ichimoku_kijun', 'ichimoku_senkou_a', 'ichimoku_senkou_b'] },
+];
+const DEFAULT_ON = { ema9: false, ema21: true, ema50: true, ema200: true, bb: false, donchian: false, ichimoku: true };
+
+let assets = {};
+let currentKey = null;
+let overlayState = { ...DEFAULT_ON };
+let oscMode = 'rsi';
+
+let mainChart, candleSeries, volumeSeries;
+let overlaySeries = {}; // key -> series or {a, b} for bands/ichimoku
+let oscChart, oscSeriesRefs = {};
+let syncing = false;
+
+function fmtPrice(v, decimals) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  if (decimals >= 6) return '$' + v.toFixed(8);
+  if (decimals === 3) return '$' + v.toFixed(3);
+  return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtPct(v) {
+  if (v === null || v === undefined || isNaN(v)) return '';
+  const s = (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+  return s;
+}
+
+function buildCharts() {
+  const chartOpts = {
+    layout: { background: { color: '#11161d' }, textColor: '#8a94a6' },
+    grid: { vertLines: { color: '#1c232e' }, horzLines: { color: '#1c232e' } },
+    rightPriceScale: { borderColor: '#232a35' },
+    timeScale: { borderColor: '#232a35', rightOffset: 28, timeVisible: true },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    autoSize: true,
+  };
+
+  mainChart = LightweightCharts.createChart(document.getElementById('chart'), chartOpts);
+  candleSeries = mainChart.addCandlestickSeries({
+    upColor: '#00d67a', downColor: '#ff5a5a', borderVisible: false,
+    wickUpColor: '#00d67a', wickDownColor: '#ff5a5a',
+  });
+  volumeSeries = mainChart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'vol',
+  });
+  mainChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+
+  for (const ov of OVERLAYS) {
+    if (ov.kind === 'line') {
+      overlaySeries[ov.key] = mainChart.addLineSeries({
+        color: ov.color, lineWidth: 2, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false,
+      });
+    } else if (ov.kind === 'band') {
+      overlaySeries[ov.key] = {
+        a: mainChart.addLineSeries({ color: ov.color, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
+        b: mainChart.addLineSeries({ color: ov.color, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
+      };
+    } else if (ov.kind === 'ichimoku') {
+      overlaySeries[ov.key] = {
+        tenkan: mainChart.addLineSeries({ color: '#ffb703', lineWidth: 1, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
+        kijun: mainChart.addLineSeries({ color: '#8338ec', lineWidth: 1, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
+        senkouA: mainChart.addLineSeries({ color: 'rgba(0,214,122,0.7)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
+        senkouB: mainChart.addLineSeries({ color: 'rgba(255,90,90,0.7)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
+      };
+    }
+  }
+
+  oscChart = LightweightCharts.createChart(document.getElementById('osc'), { ...chartOpts, timeScale: { ...chartOpts.timeScale, visible: true } });
+
+  // sincroniza o eixo de tempo entre os dois gráficos
+  mainChart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+    if (syncing || !r) return; syncing = true; oscChart.timeScale().setVisibleLogicalRange(r); syncing = false;
+  });
+  oscChart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+    if (syncing || !r) return; syncing = true; mainChart.timeScale().setVisibleLogicalRange(r); syncing = false;
+  });
+}
+
+function buildOverlayToolbar() {
+  const el = document.getElementById('overlayToolbar');
+  el.innerHTML = '';
+  for (const ov of OVERLAYS) {
+    const label = document.createElement('label');
+    label.className = overlayState[ov.key] ? 'on' : '';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!overlayState[ov.key];
+    cb.addEventListener('change', () => {
+      overlayState[ov.key] = cb.checked;
+      label.className = cb.checked ? 'on' : '';
+      applyOverlayVisibility(ov.key);
+    });
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = ov.color;
+    label.appendChild(cb);
+    label.appendChild(swatch);
+    label.appendChild(document.createTextNode(ov.label));
+    el.appendChild(label);
+  }
+}
+
+function applyOverlayVisibility(key) {
+  const s = overlaySeries[key];
+  const visible = !!overlayState[key];
+  if (!s) return;
+  if (s.setData) s.applyOptions({ visible });
+  else Object.values(s).forEach(sub => sub.applyOptions({ visible }));
+}
+
+function buildTabs() {
+  const el = document.getElementById('tabs');
+  el.innerHTML = '';
+  for (const key of Object.keys(assets)) {
+    const btn = document.createElement('div');
+    btn.className = 'tab' + (key === currentKey ? ' active' : '');
+    btn.textContent = `${assets[key].icon} ${key}`;
+    btn.addEventListener('click', () => switchAsset(key));
+    el.appendChild(btn);
+  }
+}
+
+function switchAsset(key) {
+  currentKey = key;
+  buildTabs();
+  loadChart();
+  loadSnapshot();
+}
+
+async function loadChart() {
+  const res = await fetch(`/api/chart/${currentKey}`);
+  if (!res.ok) { setStatus('erro ao carregar gráfico', true); return; }
+  const data = await res.json();
+
+  candleSeries.setData(data.candles);
+  volumeSeries.setData(data.volume);
+
+  overlaySeries.ema9.setData(data.ema9);
+  overlaySeries.ema21.setData(data.ema21);
+  overlaySeries.ema50.setData(data.ema50);
+  overlaySeries.ema200.setData(data.ema200);
+
+  overlaySeries.bb.a.setData(data.bb_upper);
+  overlaySeries.bb.b.setData(data.bb_lower);
+
+  overlaySeries.donchian.a.setData(data.donchian_upper);
+  overlaySeries.donchian.b.setData(data.donchian_lower);
+
+  overlaySeries.ichimoku.tenkan.setData(data.ichimoku_tenkan);
+  overlaySeries.ichimoku.kijun.setData(data.ichimoku_kijun);
+  overlaySeries.ichimoku.senkouA.setData(data.ichimoku_senkou_a);
+  overlaySeries.ichimoku.senkouB.setData(data.ichimoku_senkou_b);
+
+  updateOscillator(data);
+  mainChart.timeScale().fitContent();
+  setStatus(`atualizado ${new Date().toLocaleTimeString('pt-BR')}`);
+}
+
+function clearOscSeries() {
+  for (const s of Object.values(oscSeriesRefs)) { try { oscChart.removeSeries(s); } catch (e) {} }
+  oscSeriesRefs = {};
+}
+
+function updateOscillator(data) {
+  clearOscSeries();
+  if (oscMode === 'rsi') {
+    const s = oscChart.addLineSeries({ color: '#4cc9f0', lineWidth: 2, lastValueVisible: true });
+    s.setData(data.rsi);
+    s.createPriceLine({ price: 80, color: '#ff5a5a', lineStyle: LightweightCharts.LineStyle.Dashed, lineWidth: 1, title: '80' });
+    s.createPriceLine({ price: 20, color: '#00d67a', lineStyle: LightweightCharts.LineStyle.Dashed, lineWidth: 1, title: '20' });
+    s.createPriceLine({ price: 70, color: '#555', lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, title: '70' });
+    s.createPriceLine({ price: 30, color: '#555', lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, title: '30' });
+    oscSeriesRefs.rsi = s;
+  } else if (oscMode === 'macd') {
+    const hist = oscChart.addHistogramSeries({});
+    hist.setData(data.macd_hist.map(p => ({ time: p.time, value: p.value, color: p.value >= 0 ? 'rgba(0,214,122,0.6)' : 'rgba(255,90,90,0.6)' })));
+    const line = oscChart.addLineSeries({ color: '#ffd166', lineWidth: 1 });
+    line.setData(data.macd_line);
+    const sig = oscChart.addLineSeries({ color: '#8338ec', lineWidth: 1 });
+    sig.setData(data.macd_signal);
+    oscSeriesRefs = { hist, line, sig };
+  } else if (oscMode === 'obv') {
+    const s = oscChart.addLineSeries({ color: '#06d6a0', lineWidth: 2 });
+    s.setData(data.obv);
+    oscSeriesRefs.obv = s;
+  }
+}
+
+async function loadSnapshot() {
+  const res = await fetch(`/api/snapshot/${currentKey}`);
+  if (!res.ok) return;
+  const d = await res.json();
+  const cfg = assets[currentKey];
+
+  document.getElementById('assetName').textContent = `${cfg.icon} ${currentKey} · ${cfg.name}`;
+  document.getElementById('price').textContent = fmtPrice(d.price, cfg.decimals);
+  const chg1h = document.getElementById('chg1h');
+  chg1h.textContent = fmtPct(d.change_1h) + ' (1h)';
+  chg1h.className = 'chg ' + (d.change_1h >= 0 ? 'up' : 'down');
+  const chg24 = document.getElementById('chg24h');
+  chg24.textContent = fmtPct(d.change_24h) + ' (24h)';
+  chg24.className = 'chg ' + (d.change_24h >= 0 ? 'up' : 'down');
+
+  const badge = document.getElementById('signalBadge');
+  badge.textContent = d.signal;
+  badge.className = 'signal-badge ' + (d.signal.includes('COMPRA') ? 'sig-buy' : d.signal.includes('VENDA') ? 'sig-sell' : 'sig-neutral');
+
+  document.getElementById('score').textContent = (d.score > 0 ? '+' : '') + d.score;
+  document.getElementById('sl').textContent = fmtPrice(d.stop_loss, cfg.decimals);
+  document.getElementById('tp1').textContent = fmtPrice(d.take_profit_1, cfg.decimals);
+  document.getElementById('tp2').textContent = fmtPrice(d.take_profit_2, cfg.decimals);
+
+  document.getElementById('rsiVal').textContent = d.rsi.toFixed(1);
+  document.getElementById('macdVal').textContent = d.macd_hist.toFixed(4);
+  document.getElementById('channelVal').textContent = d.channel_breakout;
+  document.getElementById('obvVal').textContent = d.obv_trend;
+  document.getElementById('ichiVal').textContent = d.ichimoku_bias;
+  document.getElementById('bbVal').textContent = (d.bb_zscore >= 0 ? '+' : '') + d.bb_zscore.toFixed(1) + 'σ';
+
+  const reasonsEl = document.getElementById('reasons');
+  reasonsEl.innerHTML = '';
+  if (d.reasons && d.reasons.length) {
+    for (const r of d.reasons) {
+      const li = document.createElement('li');
+      li.textContent = r;
+      reasonsEl.appendChild(li);
+    }
+  } else {
+    reasonsEl.innerHTML = '<li>Sem confluências relevantes no momento.</li>';
+  }
+}
+
+function setStatus(msg, isError) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--red)' : 'var(--muted)';
+}
+
+async function refreshLoop() {
+  try {
+    await loadChart();
+    await loadSnapshot();
+  } catch (e) {
+    setStatus('erro ao atualizar: ' + e, true);
+  }
+}
+
+async function init() {
+  const res = await fetch('/api/assets');
+  assets = await res.json();
+  currentKey = Object.keys(assets)[0];
+
+  buildTabs();
+  buildOverlayToolbar();
+  buildCharts();
+
+  document.getElementById('oscSelect').addEventListener('change', async (e) => {
+    oscMode = e.target.value;
+    await loadChart();
+  });
+
+  await refreshLoop();
+  setInterval(refreshLoop, REFRESH_MS);
+}
+
+init();
+</script>
+</body>
+</html>

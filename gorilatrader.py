@@ -1242,8 +1242,37 @@ def main():
         action="store_true",
         help="Envia uma mensagem de teste para o Telegram configurado e encerra",
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Sobe o dashboard web (gráfico estilo TradingView) em vez do terminal",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Porta do dashboard web ao usar --serve (padrão: 8000)",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Endereço de bind do dashboard web ao usar --serve (padrão: 127.0.0.1, use 0.0.0.0 para acesso na rede)",
+    )
 
     args = parser.parse_args()
+
+    if args.serve:
+        try:
+            from webserver import run_server
+        except ImportError as exc:
+            console = Console()
+            console.print(f"[red]❌ Dependências do dashboard web ausentes: {exc}[/red]")
+            console.print("[yellow]Instale com: pip install fastapi 'uvicorn[standard]'[/yellow]")
+            return
+        console = Console()
+        console.print(f"[bold green]🦍 GorilaTrader Web em http://{args.host}:{args.port}[/bold green]")
+        run_server(host=args.host, port=args.port)
+        return
 
     telegram_token, telegram_chat_id = resolve_telegram_credentials(TELEGRAM_CFG)
     if args.no_telegram:

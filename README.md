@@ -160,6 +160,13 @@ python3 gorilatrader.py --voice
 python3 gorilatrader.py --test-telegram
 ```
 
+### 7. Dashboard Web (gráfico profissional estilo TradingView)
+```bash
+python3 gorilatrader.py --serve
+# abre em http://127.0.0.1:8000
+```
+Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Charts](https://github.com/tradingview/lightweight-charts), open-source da própria TradingView) com overlays configuráveis (EMA9/21/50/200, Bandas de Bollinger, Canal Donchian, Nuvem de Ichimoku) e um painel de oscilador (RSI/MACD/OBV) sincronizado. A barra lateral mostra sinal, score, Stop Loss/Take Profits e os fatores técnicos do ativo selecionado - atualiza sozinho a cada 20s. Use `--port` para trocar a porta e `--host 0.0.0.0` para acessar de outro dispositivo na rede.
+
 ---
 
 ## 📊 Classificação dos Sinais
@@ -179,6 +186,8 @@ python3 gorilatrader.py --test-telegram
 ```
 GorilaTrader/
 ├── gorilatrader.py         # Motor de análise + dashboard no terminal (Rich)
+├── webserver.py            # Backend do dashboard web (FastAPI) - reaproveita o motor acima
+├── web/index.html          # Frontend do dashboard web (Lightweight Charts, sem build step)
 ├── run.sh                  # Script de inicialização (abre terminal se clicado fora de um)
 ├── requirements.txt        # Dependências Python
 ├── config.example.json     # Modelo de configuração (copie para config.json)
