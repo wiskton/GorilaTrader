@@ -36,10 +36,20 @@ from rich.table import Table
 from rich.text import Text
 
 # ---------------------------------------------------------------------------
+# Diretório de dados: config.json, alerts_history.json e gorilatrader.log.
+# Por padrão fica ao lado do script (uso local); em Docker, defina
+# GORILATRADER_DATA_DIR apontando para um volume montado, para o estado
+# sobreviver a restarts/rebuilds do container.
+# ---------------------------------------------------------------------------
+
+DATA_DIR = os.environ.get("GORILATRADER_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
 # Logging (falhas de rede/API vão para gorilatrader.log em vez de sumir em silêncio)
 # ---------------------------------------------------------------------------
 
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gorilatrader.log")
+LOG_PATH = os.path.join(DATA_DIR, "gorilatrader.log")
 logging.basicConfig(
     filename=LOG_PATH,
     level=logging.INFO,
@@ -117,7 +127,7 @@ API_URLS = {
     "bybit_spot": "https://api.bybit.com/v5/market/kline",
 }
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 
 
 def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict]:
@@ -164,7 +174,7 @@ ASSETS, WEIGHTS, TELEGRAM_CFG = load_config()
 # Persistência do Histórico de Alertas (sobrevive a reinícios do programa)
 # ---------------------------------------------------------------------------
 
-ALERTS_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alerts_history.json")
+ALERTS_HISTORY_PATH = os.path.join(DATA_DIR, "alerts_history.json")
 MAX_HISTORY_ENTRIES = 200
 
 

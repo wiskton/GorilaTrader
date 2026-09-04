@@ -212,6 +212,28 @@ pytest -v tests/test_scoring_matrix.py   # só a matriz de confluência, com nom
 
 ---
 
+## 🐳 Docker (monitoramento 24/7 num servidor/VPS)
+
+A imagem roda o **dashboard web** (`--serve`, que também dispara os alertas) - o modo terminal com apito/voz depende de dispositivos de áudio do host e não faz sentido num container headless.
+
+```bash
+docker build -t gorilatrader .
+docker run -d -p 8000:8000 \
+  -e TELEGRAM_BOT_TOKEN="123456:ABC..." \
+  -e TELEGRAM_CHAT_ID="@seu_canal" \
+  -v gorilatrader-data:/data \
+  --name gorilatrader gorilatrader
+```
+
+Ou com Docker Compose (lê `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` de um arquivo `.env` na mesma pasta, se existir):
+```bash
+docker compose up -d
+```
+
+O volume em `/data` (controlado por `GORILATRADER_DATA_DIR`) persiste `config.json`, `alerts_history.json` e `gorilatrader.log` entre restarts/rebuilds - sem ele, o histórico reseta a cada `docker compose up`.
+
+---
+
 ## 📂 Estrutura do Projeto
 
 ```
@@ -220,6 +242,7 @@ GorilaTrader/
 ├── webserver.py            # Backend do dashboard web (FastAPI + WebSocket) - reaproveita o motor acima
 ├── web/index.html          # Frontend do dashboard web (Lightweight Charts, sem build step)
 ├── tests/                  # Suíte pytest (matriz de confluência, config, Telegram, histórico)
+├── Dockerfile / docker-compose.yml / .dockerignore  # Empacotamento para servidor/VPS
 ├── run.sh                  # Inicia o dashboard no terminal (abre terminal se clicado fora de um)
 ├── run-web.sh              # Inicia o dashboard web e abre o navegador
 ├── install-desktop.sh      # Instala os atalhos no menu de aplicativos

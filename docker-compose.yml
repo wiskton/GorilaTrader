@@ -1,0 +1,20 @@
+services:
+  gorilatrader:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Prefira variáveis de ambiente para os segredos do Telegram (evita
+      # colocar o token num config.json dentro do volume). Defina no seu
+      # shell ou num arquivo .env na mesma pasta (docker compose lê .env
+      # automaticamente).
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      # Persiste config.json/alerts_history.json/gorilatrader.log entre
+      # restarts e rebuilds - sem isso o histórico reseta a cada `docker compose up`.
+      - gorilatrader-data:/data
+    restart: unless-stopped
+
+volumes:
+  gorilatrader-data:

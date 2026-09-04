@@ -52,12 +52,19 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 
 ---
 
+## ✅ v1.4 — Docker (entregue)
+
+- [x] `Dockerfile` + `docker-compose.yml` + `.dockerignore` - imagem roda o dashboard web (`--serve --host 0.0.0.0`), testada com build e run reais
+- [x] `GORILATRADER_DATA_DIR` (env var) redireciona `config.json`/`alerts_history.json`/`gorilatrader.log` para um diretório configurável (`/data` na imagem) - permite montar um volume e persistir estado entre restarts/rebuilds, sem editar código
+- [x] Credenciais do Telegram via `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` no ambiente do container (sem precisar de `config.json` montado)
+
+---
+
 ## 🚧 Próximos Passos
 
 ### Médio prazo
 - [ ] Modo de backtest: rodar a matriz de decisão contra dados históricos e medir taxa de acerto/retorno por sinal
 - [ ] Filtro de confirmação multi-timeframe (ex.: viés de 4h/1D para filtrar sinais de 1h contra a tendência maior)
-- [ ] Empacotamento via Docker para facilitar execução em servidores/VPS (monitoramento 24/7 headless)
 - [ ] Sombreamento visual entre as bandas (Bollinger/Donchian/Nuvem de Ichimoku) no gráfico web, hoje são só linhas
 
 ### Longo prazo / explorações
