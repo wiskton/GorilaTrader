@@ -131,8 +131,79 @@ let lastChartData = null;
 
 let mainChart, candleSeries, volumeSeries;
 let overlaySeries = {}; // key -> series or {a, b} for bands/ichimoku
+let bandFillPrimitives = {}; // key -> BandFillPrimitive (sombreamento entre as bandas)
 let oscChart, oscSeriesRefs = {};
 let syncing = false;
+
+// --- Sombreamento entre duas linhas (Bollinger/Donchian/Nuvem de Ichimoku) ---
+// Lightweight Charts v4 não tem uma série nativa de "área entre duas linhas
+// dinâmicas" - só baseline (preenche até um valor FIXO). Isso implementa uma
+// primitiva de desenho customizada (API oficial de plugins do v4.1+) que lê
+// os pares (upper, lower) por timestamp e pinta o polígono entre eles.
+class BandFillRenderer {
+  constructor(points, fillColor) { this._points = points; this._fillColor = fillColor; }
+  draw(target) {
+    const pts = this._points;
+    if (pts.length < 2) return;
+    target.useBitmapCoordinateSpace(scope => {
+      const ctx = scope.context;
+      const hr = scope.horizontalPixelRatio;
+      const vr = scope.verticalPixelRatio;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x * hr, pts[0].yUpper * vr);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * hr, pts[i].yUpper * vr);
+      for (let i = pts.length - 1; i >= 0; i--) ctx.lineTo(pts[i].x * hr, pts[i].yLower * vr);
+      ctx.closePath();
+      ctx.fillStyle = this._fillColor;
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+}
+
+class BandFillPaneView {
+  constructor(source) { this._source = source; this._points = []; }
+  update() {
+    const chart = this._source.chart;
+    const series = this._source.series;
+    this._points = [];
+    if (!chart || !series) return;
+    const timeScale = chart.timeScale();
+    const { upper, lower } = this._source.getData();
+    if (!upper.length || !lower.length) return;
+
+    const lowerMap = new Map(lower.map(p => [p.time, p.value]));
+    for (const u of upper) {
+      const lv = lowerMap.get(u.time);
+      if (lv === undefined || u.value == null || lv == null) continue;
+      const x = timeScale.timeToCoordinate(u.time);
+      const yUpper = series.priceToCoordinate(u.value);
+      const yLower = series.priceToCoordinate(lv);
+      if (x === null || yUpper === null || yLower === null) continue;
+      this._points.push({ x, yUpper, yLower });
+    }
+  }
+  renderer() {
+    return new BandFillRenderer(this._points, this._source.fillColor);
+  }
+}
+
+class BandFillPrimitive {
+  constructor(getData, fillColor) {
+    this.getData = getData;       // () => { upper: [{time,value}], lower: [{time,value}] }
+    this.fillColor = fillColor;
+    this.chart = null;
+    this.series = null;
+    this._requestUpdate = null;
+    this._paneView = new BandFillPaneView(this);
+  }
+  attached({ chart, series, requestUpdate }) { this.chart = chart; this.series = series; this._requestUpdate = requestUpdate; }
+  detached() { this.chart = null; this.series = null; this._requestUpdate = null; }
+  updateAllViews() { this._paneView.update(); }
+  paneViews() { return [this._paneView]; }
+  redraw() { if (this._requestUpdate) this._requestUpdate(); }
+}
 
 function fmtPrice(v, decimals) {
   if (v === null || v === undefined || isNaN(v)) return '—';
@@ -187,6 +258,23 @@ function buildCharts() {
     }
   }
 
+  // Sombreamento entre as bandas - preenche só quando o overlay correspondente
+  // está ligado (checkbox), e lê sempre os dados mais recentes de lastChartData.
+  const emptyBand = { upper: [], lower: [] };
+  bandFillPrimitives.bb = new BandFillPrimitive(
+    () => (overlayState.bb && lastChartData) ? { upper: lastChartData.bb_upper, lower: lastChartData.bb_lower } : emptyBand,
+    'rgba(201,209,224,0.06)',
+  );
+  bandFillPrimitives.donchian = new BandFillPrimitive(
+    () => (overlayState.donchian && lastChartData) ? { upper: lastChartData.donchian_upper, lower: lastChartData.donchian_lower } : emptyBand,
+    'rgba(76,201,240,0.06)',
+  );
+  bandFillPrimitives.ichimoku = new BandFillPrimitive(
+    () => (overlayState.ichimoku && lastChartData) ? { upper: lastChartData.ichimoku_senkou_a, lower: lastChartData.ichimoku_senkou_b } : emptyBand,
+    'rgba(131,56,236,0.10)',
+  );
+  for (const p of Object.values(bandFillPrimitives)) candleSeries.attachPrimitive(p);
+
   oscChart = LightweightCharts.createChart(document.getElementById('osc'), { ...chartOpts, timeScale: { ...chartOpts.timeScale, visible: true } });
 
   // sincroniza o eixo de tempo entre os dois gráficos
@@ -225,9 +313,11 @@ function buildOverlayToolbar() {
 function applyOverlayVisibility(key) {
   const s = overlaySeries[key];
   const visible = !!overlayState[key];
-  if (!s) return;
-  if (s.setData) s.applyOptions({ visible });
-  else Object.values(s).forEach(sub => sub.applyOptions({ visible }));
+  if (s) {
+    if (s.setData) s.applyOptions({ visible });
+    else Object.values(s).forEach(sub => sub.applyOptions({ visible }));
+  }
+  if (bandFillPrimitives[key]) bandFillPrimitives[key].redraw();
 }
 
 function buildTabs() {
@@ -272,6 +362,7 @@ function applyChart(data) {
   overlaySeries.ichimoku.senkouB.setData(data.ichimoku_senkou_b);
 
   updateOscillator(data);
+  for (const p of Object.values(bandFillPrimitives)) p.redraw();
   mainChart.timeScale().fitContent();
 }
 

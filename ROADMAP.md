@@ -76,12 +76,15 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Exibido no relatório detalhado (`--once`) e na barra lateral do dashboard web; novo peso `mtf_confirmation` configurável em `config.json`
 - [x] 7 testes cobrindo alinhamento/divergência em ambas direções, ausência de dado de 4h, histórico insuficiente e cache
 
+## ✅ v1.7 — Sombreamento das Bandas no Gráfico Web (entregue)
+
+- [x] `BandFillPrimitive` em `web/index.html`: primitiva de desenho customizada (API oficial de plugins do Lightweight Charts v4.1+, confirmada presente na versão exata pinada) que preenche a área entre duas linhas (upper/lower) por timestamp - o Lightweight Charts não tem série nativa pra isso (baseline só preenche até um valor fixo)
+- [x] Aplicado às Bandas de Bollinger, Canal Donchian e Nuvem de Ichimoku (senkou A/B), respeitando os checkboxes de cada overlay e redesenhando ao trocar de ativo ou alternar visibilidade
+- [x] ⚠️ Não verificado visualmente num navegador real nesta sessão (sem acesso ao Chrome) - a API usada foi confirmada existente na lib exata carregada, mas vale conferir a aparência final
+
 ---
 
 ## 🚧 Próximos Passos
-
-### Médio prazo
-- [ ] Sombreamento visual entre as bandas (Bollinger/Donchian/Nuvem de Ichimoku) no gráfico web, hoje são só linhas
 
 ### Longo prazo / explorações
 - [ ] Suporte a mais exchanges como fonte de dados (OKX, Kraken)
