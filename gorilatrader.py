@@ -145,10 +145,14 @@ DEFAULT_PAPER_TRADING_CFG = {
     "max_holding_hours": 200,  # mesma janela do backtest (MAX_HOLDING_BARS_DEFAULT, em candles de 1h)
 }
 
+DEFAULT_WEB_AUTH_CFG = {
+    "password": "",  # vazio = autenticação desativada (padrão, compatível com o comportamento anterior)
+}
 
-def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict, dict]:
-    """Carrega ativos, pesos, credenciais do Telegram e config do modo papel
-    de config.json, mesclando com os padrões.
+
+def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict, dict, dict]:
+    """Carrega ativos, pesos, credenciais do Telegram, config do modo papel e
+    da autenticação do dashboard web de config.json, mesclando com os padrões.
 
     Se o arquivo não existir ou estiver malformado, usa somente os padrões
     embutidos - o programa nunca deixa de funcionar por causa de config.json.
@@ -157,16 +161,17 @@ def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict, dict]:
     weights = dict(DEFAULT_WEIGHTS)
     telegram: dict = {}
     paper_trading = dict(DEFAULT_PAPER_TRADING_CFG)
+    web_auth = dict(DEFAULT_WEB_AUTH_CFG)
 
     if not os.path.exists(path):
-        return assets, weights, telegram, paper_trading
+        return assets, weights, telegram, paper_trading, web_auth
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as exc:
         logger.error("Falha ao ler %s: %s. Usando configuração padrão.", path, exc)
-        return assets, weights, telegram, paper_trading
+        return assets, weights, telegram, paper_trading, web_auth
 
     if isinstance(data.get("assets"), dict) and data["assets"]:
         assets = data["assets"]
@@ -176,8 +181,10 @@ def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict, dict]:
         telegram = data["telegram"]
     if isinstance(data.get("paper_trading"), dict):
         paper_trading.update(data["paper_trading"])
+    if isinstance(data.get("web_auth"), dict):
+        web_auth.update(data["web_auth"])
 
-    return assets, weights, telegram, paper_trading
+    return assets, weights, telegram, paper_trading, web_auth
 
 
 def resolve_telegram_credentials(telegram_cfg: dict) -> Tuple[Optional[str], Optional[str]]:
@@ -187,7 +194,15 @@ def resolve_telegram_credentials(telegram_cfg: dict) -> Tuple[Optional[str], Opt
     return token, chat_id
 
 
-ASSETS, WEIGHTS, TELEGRAM_CFG, PAPER_TRADING_CFG = load_config()
+def resolve_web_password(web_auth_cfg: dict) -> Optional[str]:
+    """Senha do dashboard web (--serve). Variável de ambiente tem prioridade
+    sobre config.json. Vazio/None = autenticação desativada (comportamento
+    padrão, igual antes desse recurso existir)."""
+    password = os.environ.get("GORILATRADER_WEB_PASSWORD") or web_auth_cfg.get("password")
+    return password or None
+
+
+ASSETS, WEIGHTS, TELEGRAM_CFG, PAPER_TRADING_CFG, WEB_AUTH_CFG = load_config()
 
 # ---------------------------------------------------------------------------
 # Seleção de ativos digitada pela pessoa (--assets ou prompt interativo no
@@ -1722,14 +1737,20 @@ def main():
 
     if args.serve:
         try:
-            from webserver import run_server
+            from webserver import AUTH_ENABLED, run_server
         except ImportError as exc:
             console = Console()
             console.print(f"[red]❌ Dependências do dashboard web ausentes: {exc}[/red]")
-            console.print("[yellow]Instale com: pip install fastapi 'uvicorn[standard]'[/yellow]")
+            console.print("[yellow]Instale com: pip install fastapi 'uvicorn[standard]' python-multipart[/yellow]")
             return
         console = Console()
         console.print(f"[bold green]🦍 GorilaTrader Web em http://{args.host}:{args.port}[/bold green]")
+        if args.host not in ("127.0.0.1", "localhost", "::1") and not AUTH_ENABLED:
+            console.print(
+                "[bold yellow]⚠ Exposto fora do localhost sem senha configurada - qualquer um na rede "
+                "pode acessar. Defina GORILATRADER_WEB_PASSWORD ou 'web_auth.password' em config.json "
+                "para exigir login.[/bold yellow]"
+            )
         run_server(host=args.host, port=args.port)
         return
 

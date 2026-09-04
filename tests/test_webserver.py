@@ -6,6 +6,7 @@ isso evita depender de um cliente HTTP só pra testar a lógica."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +37,13 @@ def _empty_response():
     resp.raise_for_status.return_value = None
     resp.json.return_value = []
     return resp
+
+
+def _fake_request():
+    """Autenticação está desativada neste ambiente de teste (sem senha
+    configurada), então require_auth passa direto independente de cookies -
+    só precisa de um objeto com `.cookies` pra bater a assinatura da rota."""
+    return SimpleNamespace(cookies={})
 
 
 def test_resolve_asset_config_reuses_currently_configured_asset():
@@ -77,14 +85,14 @@ def test_resolve_asset_config_caches_new_asset_across_calls():
 
 
 def test_api_resolve_returns_payload_for_known_ticker():
-    payload = webserver.api_resolve("btc")
+    payload = webserver.api_resolve("btc", _fake_request())
     assert payload == {"key": "BTC", "name": "Bitcoin", "icon": "₿", "decimals": 2}
 
 
 def test_api_resolve_returns_404_for_unresolvable_ticker():
     with patch("gorilatrader.requests.get", return_value=_empty_response()):
         with pytest.raises(HTTPException) as exc_info:
-            webserver.api_resolve("naoexistetickerxyz")
+            webserver.api_resolve("naoexistetickerxyz", _fake_request())
     assert exc_info.value.status_code == 404
 
 
@@ -96,7 +104,7 @@ def test_api_chart_uses_resolved_favorite_not_in_assets():
     resp.json.return_value = [row] * 60
 
     with patch("gorilatrader.requests.get", return_value=resp):
-        response = webserver.api_chart("doge")
+        response = webserver.api_chart("doge", _fake_request())
 
     import json
     payload = json.loads(response.body)
@@ -107,13 +115,13 @@ def test_api_chart_uses_resolved_favorite_not_in_assets():
 def test_api_chart_404_for_unresolvable_ticker():
     with patch("gorilatrader.requests.get", return_value=_empty_response()):
         with pytest.raises(HTTPException) as exc_info:
-            webserver.api_chart("naoexistetickerxyz")
+            webserver.api_chart("naoexistetickerxyz", _fake_request())
     assert exc_info.value.status_code == 404
 
 
 def test_api_paper_trading_reports_disabled_when_engine_missing(monkeypatch):
     monkeypatch.setattr(webserver.alert_monitor, "paper", None)
-    payload = webserver.api_paper_trading()
+    payload = webserver.api_paper_trading(_fake_request())
     assert payload == {"enabled": False, "summary": {}, "open": [], "closed": [], "decimals": {}}
 
 
@@ -133,7 +141,7 @@ def test_api_paper_trading_reports_open_and_closed_trades(monkeypatch):
     fake_engine.closed_trades = [closed_trade]
     monkeypatch.setattr(webserver.alert_monitor, "paper", fake_engine)
 
-    payload = webserver.api_paper_trading()
+    payload = webserver.api_paper_trading(_fake_request())
 
     assert payload["enabled"] is True
     assert payload["summary"] == {"TODOS": {"trades": 1}}
@@ -157,7 +165,7 @@ def test_api_paper_trading_limits_closed_trades_to_last_30(monkeypatch):
     fake_engine.closed_trades = trades
     monkeypatch.setattr(webserver.alert_monitor, "paper", fake_engine)
 
-    payload = webserver.api_paper_trading()
+    payload = webserver.api_paper_trading(_fake_request())
 
     assert len(payload["closed"]) == 30
     assert payload["closed"][0]["entry_time"] == "2026-01-01T00:00:10"

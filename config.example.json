@@ -41,5 +41,10 @@
     "_comment": "Modo papel: simula a execução dos sinais (sem enviar ordem real) para acompanhar a performance da estratégia com o tempo. Veja --paper-report, --reset-paper-trading e --no-paper-trading.",
     "enabled": true,
     "max_holding_hours": 200
+  },
+
+  "web_auth": {
+    "_comment": "Prefira a variável de ambiente GORILATRADER_WEB_PASSWORD em vez de colocar a senha aqui. Desativada (padrão) se vazio - só necessário se for expor o dashboard web fora do localhost (--serve --host 0.0.0.0). Login em /login, sessão via cookie assinado (30 dias), /logout encerra.",
+    "password": ""
   }
 }

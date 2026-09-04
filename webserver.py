@@ -10,33 +10,119 @@ Rode com:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import math
 import os
+import secrets
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import List, Optional
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from gorilatrader import (
     ASSETS,
     DEFAULT_ASSETS,
     PAPER_TRADING_CFG,
     TELEGRAM_CFG,
+    WEB_AUTH_CFG,
     CryptoAnalyzer,
     GorilaTraderTerminal,
     MarketData,
     _detect_display_decimals,
     logger,
     resolve_telegram_credentials,
+    resolve_web_password,
 )
 
 BAR_SECONDS = 3600  # candles de 1h
 WS_INTERVAL_SECONDS = 20  # cadência de push do WebSocket, mesma ordem do terminal
 ALERT_CHECK_INTERVAL_SECONDS = 60  # cadência do monitor de alertas em segundo plano
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+
+# ---------------------------------------------------------------------------
+# Autenticação simples (opcional) - protege o dashboard quando exposto fora
+# do localhost (--host 0.0.0.0). Desativada por padrão (comportamento igual
+# antes desse recurso existir); liga sozinha se uma senha for configurada via
+# GORILATRADER_WEB_PASSWORD ou "web_auth.password" em config.json.
+#
+# Sessão via cookie assinado (HMAC-SHA256, sem dependência nova) em vez de
+# HTTP Basic: o WebSocket do navegador não permite mandar header de
+# Authorization no handshake, mas cookies (mesma origem) vão automaticamente -
+# então cookie é o único jeito de autenticar tanto a página quanto o /ws/{key}
+# com o mesmo login.
+# ---------------------------------------------------------------------------
+
+SESSION_COOKIE = "gorila_session"
+SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 dias
+
+_WEB_PASSWORD = resolve_web_password(WEB_AUTH_CFG)
+AUTH_ENABLED = bool(_WEB_PASSWORD)
+_SESSION_SECRET = secrets.token_hex(32)  # gerado por processo - reiniciar o servidor derruba sessões abertas
+
+
+def _sign(payload: str) -> str:
+    return hmac.new(_SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _make_session_token() -> str:
+    payload = str(int(time.time()))
+    return f"{payload}.{_sign(payload)}"
+
+
+def _is_valid_session(token: Optional[str]) -> bool:
+    if not AUTH_ENABLED:
+        return True
+    if not token or "." not in token:
+        return False
+    payload, _, sig = token.rpartition(".")
+    if not hmac.compare_digest(sig, _sign(payload)):
+        return False
+    try:
+        issued_at = int(payload)
+    except ValueError:
+        return False
+    return (time.time() - issued_at) < SESSION_TTL_SECONDS
+
+
+def require_auth(request: Request) -> None:
+    """Levanta 401 se a autenticação estiver ativada e o cookie de sessão não
+    for válido. Checagem explícita chamada no corpo de cada rota (em vez de
+    Depends()) pra dar pra testar chamando a função direto, sem precisar de
+    um cliente ASGI de verdade."""
+    if not _is_valid_session(request.cookies.get(SESSION_COOKIE)):
+        raise HTTPException(status_code=401, detail="Autenticação necessária")
+
+
+_LOGIN_PAGE = """<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GorilaTrader Web - Login</title>
+<style>
+body{{background:#0b0f14;color:#e6ebf2;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
+form{{background:#11161d;border:1px solid #232a35;border-radius:10px;padding:28px 32px;min-width:280px;}}
+h1{{font-size:16px;margin:0 0 16px;}}
+input{{width:100%;background:#161c25;color:#e6ebf2;border:1px solid #232a35;border-radius:6px;padding:8px 10px;font-size:14px;box-sizing:border-box;margin-bottom:12px;}}
+button{{width:100%;background:#00d67a;color:#04140c;border:none;border-radius:6px;padding:9px;font-weight:700;cursor:pointer;font-size:14px;}}
+.err{{color:#ff5a5a;font-size:12px;margin:-6px 0 12px;}}
+</style></head>
+<body>
+<form method="post" action="/login">
+  <h1>🦍 GorilaTrader Web</h1>
+  {error_html}
+  <input type="password" name="password" placeholder="Senha" autofocus />
+  <button type="submit">Entrar</button>
+</form>
+</body></html>"""
+
+
+def _login_page(error: bool = False) -> str:
+    error_html = '<div class="err">Senha incorreta.</div>' if error else ""
+    return _LOGIN_PAGE.format(error_html=error_html)
+
 
 # O dashboard web é só visualização - sem este monitor rodando em segundo
 # plano, sinais de COMPRA/VENDA e alertas extremos (RSI/Bollinger) nunca
@@ -114,6 +200,34 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="GorilaTrader Web", lifespan=lifespan)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form():
+    if not AUTH_ENABLED:
+        return RedirectResponse("/")
+    return _login_page()
+
+
+@app.post("/login")
+def login_submit(password: str = Form(...)):
+    if not AUTH_ENABLED:
+        return RedirectResponse("/", status_code=303)
+    if not hmac.compare_digest(password, _WEB_PASSWORD):
+        return HTMLResponse(_login_page(error=True), status_code=401)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE, _make_session_token(),
+        httponly=True, samesite="lax", max_age=SESSION_TTL_SECONDS,
+    )
+    return response
+
+
+@app.post("/logout")
+def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
 
 
 def _clean(value) -> Optional[float]:
@@ -223,7 +337,8 @@ def build_chart_payload(key: str, config: dict) -> dict:
 
 
 @app.get("/api/assets")
-def api_assets():
+def api_assets(request: Request):
+    require_auth(request)
     return {
         key: {"name": cfg["name"], "icon": cfg["icon"], "decimals": cfg["decimals"]}
         for key, cfg in ASSETS.items()
@@ -231,10 +346,11 @@ def api_assets():
 
 
 @app.get("/api/paper-trading")
-def api_paper_trading():
+def api_paper_trading(request: Request):
     """Performance do modo papel (mesmo motor que roda em segundo plano no
     monitor de alertas - ver alert_monitor.paper) para exibição no dashboard
     web, equivalente ao --paper-report do terminal."""
+    require_auth(request)
     engine = alert_monitor.paper
     if engine is None:
         return {"enabled": False, "summary": {}, "open": [], "closed": [], "decimals": {}}
@@ -248,9 +364,10 @@ def api_paper_trading():
 
 
 @app.get("/api/resolve/{ticker}")
-def api_resolve(ticker: str):
+def api_resolve(ticker: str, request: Request):
     """Resolve um ticker digitado no navegador (favoritos) que pode não estar
     em ASSETS - ver resolve_asset_config."""
+    require_auth(request)
     key = ticker.upper()
     cfg = resolve_asset_config(key)
     if cfg is None:
@@ -259,7 +376,8 @@ def api_resolve(ticker: str):
 
 
 @app.get("/api/chart/{key}")
-def api_chart(key: str):
+def api_chart(key: str, request: Request):
+    require_auth(request)
     key = key.upper()
     cfg = resolve_asset_config(key)
     if cfg is None:
@@ -296,7 +414,8 @@ def snapshot_payload(item: MarketData) -> dict:
 
 
 @app.get("/api/snapshot/{key}")
-def api_snapshot(key: str):
+def api_snapshot(key: str, request: Request):
+    require_auth(request)
     key = key.upper()
     cfg = resolve_asset_config(key)
     if cfg is None:
@@ -313,6 +432,10 @@ async def ws_updates(websocket: WebSocket, key: str):
     polling do frontend. As chamadas de rede (fetch_klines/analyze_asset) são
     síncronas e bloqueantes, então rodam em thread separada (asyncio.to_thread)
     para não travar outras conexões no mesmo processo."""
+    if not _is_valid_session(websocket.cookies.get(SESSION_COOKIE)):
+        await websocket.close(code=4401)
+        return
+
     key = key.upper()
     config = await asyncio.to_thread(resolve_asset_config, key)
     if config is None:
@@ -358,7 +481,9 @@ async def ws_updates(websocket: WebSocket, key: str):
 
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+def index(request: Request):
+    if AUTH_ENABLED and not _is_valid_session(request.cookies.get(SESSION_COOKIE)):
+        return RedirectResponse("/login")
     path = os.path.join(WEB_DIR, "index.html")
     with open(path, "r", encoding="utf-8") as f:
         return f.read()

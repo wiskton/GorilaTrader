@@ -117,12 +117,20 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] **Aviso de conclusão da operação**: quando uma posição do Modo Papel aberta por um sinal FORTE encerra em Stop Loss ou Take Profit, dispara um aviso (`🛑 STOP` / `✅ TAKE PROFIT`, com R e retorno %) no histórico do dashboard e no Telegram - mesmo filtro de "mais confiança" da entrada (`HIGH_CONFIDENCE_SIGNALS`), consistente nos dois pontos
 - [x] 9 novos testes (filtro de confiança pro Telegram em compra/venda fraca/forte, alertas de rompimento continuam incondicionais, aviso de conclusão em STOP/TP2, integração via `refresh()` só pra trades de sinal forte) - 134 testes no total
 
+## ✅ v2.2 — Autenticação no Dashboard Web (entregue)
+
+- [x] Login opcional (desativado por padrão, liga sozinho quando uma senha é configurada via `GORILATRADER_WEB_PASSWORD` ou `web_auth.password` em `config.json`) - protege `/`, toda a API (`/api/*`) e o WebSocket (`/ws/{key}`)
+- [x] Sessão via **cookie assinado** (HMAC-SHA256, sem dependência nova) em vez de HTTP Basic Auth - o WebSocket do navegador não permite mandar header `Authorization` no handshake, mas cookies (mesma origem) vão automaticamente, então é o único jeito de autenticar a página e o `/ws/{key}` com o mesmo login. Sessão válida por 30 dias; reiniciar o servidor derruba sessões abertas (segredo gerado por processo)
+- [x] `GET/POST /login` (formulário simples, tema escuro consistente com o dashboard) e `POST /logout` (botão "🚪 Sair" no cabeçalho) - página inicial redireciona pro login sem sessão válida
+- [x] Aviso visível no terminal ao rodar `--serve --host 0.0.0.0` (ou qualquer host que não seja loopback) sem senha configurada - "exposto sem autenticação, qualquer um na rede pode acessar"
+- [x] Nova dependência opcional `python-multipart` (só pro dashboard web, exigida pelo FastAPI pra ler o formulário de login)
+- [x] 20 novos testes (assinatura/validação do cookie incluindo adulteração e expiração, `require_auth` em cada rota, fluxo completo de login/logout, WebSocket fecha sem sessão válida) - 154 testes no total
+
 ---
 
 ## 🚧 Próximos Passos
 
 ### Em andamento
-- [ ] Autenticação simples no dashboard web para uso seguro com `--host 0.0.0.0` fora da rede local
 - [ ] Favoritos do dashboard web também entrarem no monitor de alertas/modo papel em segundo plano (hoje são só pra visualização, não geram apito/Telegram/posição simulada)
 
 ---

@@ -200,6 +200,14 @@ Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Ch
 
 **📝 Modo Papel no dashboard**: o botão "📝 Modo Papel" no cabeçalho abre um painel com a mesma performance do `--paper-report` do terminal (taxa de acerto, R médio, retorno % por direção, posições abertas e últimas entradas fechadas) - lê do mesmo motor que roda em segundo plano no `--serve` (`/api/paper-trading`).
 
+**🔒 Autenticação (recomendado com `--host 0.0.0.0`)**: desativada por padrão (uso local, `127.0.0.1`). Pra expor o dashboard na rede com segurança, configure uma senha:
+```bash
+export GORILATRADER_WEB_PASSWORD="sua-senha"
+# ...ou copie config.example.json pra config.json e preencha "web_auth.password"
+python3 gorilatrader.py --serve --host 0.0.0.0
+```
+Com a senha configurada, `/`, a API e o WebSocket passam a exigir login (`/login`) - a sessão fica num cookie assinado (HMAC, sem dependência nova) válido por 30 dias; `/logout` (botão "🚪 Sair" no cabeçalho) encerra. Sem senha configurada e com `--host` diferente de `127.0.0.1`, o terminal avisa que o dashboard está exposto sem proteção.
+
 Ou clique no atalho **GorilaTrader Web** no menu de aplicativos (veja abaixo) - ele sobe o servidor e já abre o navegador automaticamente:
 ```bash
 ./run-web.sh
