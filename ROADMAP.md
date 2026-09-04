@@ -48,6 +48,7 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] `requirements-dev.txt` + `pytest.ini`
 - [x] Dashboard web trocou o polling (20s) por **WebSocket** (`/ws/{ativo}`) - o servidor empurra gráfico + snapshot periodicamente, com reconexão automática no frontend se a conexão cair
 - [x] `--serve` agora roda um monitor de alertas em segundo plano (mesma lógica de `check_and_alert`/`check_extreme_alerts` do terminal) - antes, alertas (apito + Telegram) só disparavam com o dashboard do terminal aberto; agora disparam também usando só o dashboard web
+- [x] Status de posição no canal de Bollinger (`bollinger_status`: Dentro do Canal / Rompeu Superior / Rompeu Inferior) - nova coluna no terminal, linha no relatório detalhado, e campo na barra lateral do dashboard web
 
 ---
 

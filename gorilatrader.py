@@ -380,6 +380,7 @@ class MarketData:
     bb_lower: float
     bb_middle: float
     bb_zscore: float  # distância do preço à média em desvios-padrão (Bollinger 20)
+    bollinger_status: str  # Dentro do Canal, Rompeu Superior, Rompeu Inferior
     atr: float
     volume_ratio: float
     donchian_upper: float
@@ -549,6 +550,16 @@ class CryptoAnalyzer:
         b_mid = float(sma20.iloc[-1])
         b_std = float(std20.iloc[-1])
         bb_zscore = (price - b_mid) / (b_std + 1e-9)
+
+        # Posição em relação ao canal de Bollinger: dentro das bandas, ou
+        # fechamento além de uma delas (rompimento, diferente do simples
+        # "toque" perto da banda que já compõe o score em D).
+        if price > b_up:
+            bollinger_status = "Rompeu Superior"
+        elif price < b_low:
+            bollinger_status = "Rompeu Inferior"
+        else:
+            bollinger_status = "Dentro do Canal"
 
         atr = float(atr_series.iloc[-1])
 
@@ -773,6 +784,7 @@ class CryptoAnalyzer:
             bb_lower=b_low,
             bb_middle=b_mid,
             bb_zscore=bb_zscore,
+            bollinger_status=bollinger_status,
             atr=atr,
             volume_ratio=current_vol_ratio,
             donchian_upper=d_upper_now,
@@ -882,7 +894,8 @@ class GorilaTraderTerminal:
         table.add_column("MACD Hist", justify="right", width=11)
         table.add_column("Tendência", justify="center", width=14)
         table.add_column("Ichimoku", justify="center", width=17)
-        table.add_column("Canal(20)", justify="center", width=12)
+        table.add_column("Canal Donch.", justify="center", width=12)
+        table.add_column("Bollinger", justify="center", width=15)
         table.add_column("SINAL 1H", justify="center", width=17)
         table.add_column("Score", justify="center", width=8)
         table.add_column("Stop Loss", justify="right", width=14)
@@ -896,7 +909,7 @@ class GorilaTraderTerminal:
 
             if not item:
                 status = "[red]❌ Erro de conexão[/red]" if self.stale.get(key) else "[dim]Carregando...[/dim]"
-                table.add_row(f"{icon} {key}", status, "—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—")
+                table.add_row(f"{icon} {key}", status, "—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—")
                 continue
 
             p_str = self.format_price(item.price, decimals)
@@ -953,6 +966,13 @@ class GorilaTraderTerminal:
             else:
                 channel_str = "[dim]— dentro[/dim]"
 
+            if item.bollinger_status == "Rompeu Superior":
+                bollinger_str = "[bold red]▲ Rompeu Sup.[/bold red]"
+            elif item.bollinger_status == "Rompeu Inferior":
+                bollinger_str = "[bold green]▼ Rompeu Inf.[/bold green]"
+            else:
+                bollinger_str = f"[dim]◆ No Canal ({item.bb_zscore:+.1f}σ)[/dim]"
+
             if item.signal == "FORTE COMPRA":
                 sig_str = "[bold white on dark_green] 🟢 FORTE COMPRA [/bold white on dark_green]"
             elif item.signal == "COMPRA":
@@ -985,6 +1005,7 @@ class GorilaTraderTerminal:
                 trend_str,
                 ichimoku_str,
                 channel_str,
+                bollinger_str,
                 sig_str,
                 score_str,
                 f"[red]{sl_str}[/red]",
@@ -1156,6 +1177,12 @@ class GorilaTraderTerminal:
             table.add_row("Recomendação", recom)
             table.add_row("Médias Móveis (1h)", f"EMA9: {self.format_price(item.ema9, dec)} | EMA21: {self.format_price(item.ema21, dec)} | EMA50: {self.format_price(item.ema50, dec)}")
             table.add_row("Indicadores de Impulso", f"RSI(14): [bold]{item.rsi:.1f}[/bold] | MACD Hist: [bold]{item.macd_hist:.4f}[/bold] | ATR(14): {self.format_price(item.atr, dec)}")
+
+            table.add_row(
+                "Bandas de Bollinger (20,2)",
+                f"Inferior: {self.format_price(item.bb_lower, dec)} | Média: {self.format_price(item.bb_middle, dec)} "
+                f"| Superior: {self.format_price(item.bb_upper, dec)} | Posição: [bold]{item.bollinger_status}[/bold] ({item.bb_zscore:+.1f}σ)",
+            )
 
             channel_str_r1 = f"[bold]{item.channel_breakout}[/bold]" if item.channel_breakout != "—" else "sem rompimento"
             table.add_row(

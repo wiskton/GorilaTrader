@@ -41,6 +41,7 @@ No gráfico de 1h, o GorilaTrader utiliza uma matriz de confluência estatístic
 
 4. **Volatilidade (Bandas de Bollinger 20, 2)**:
    - Identifica squeezes de volatilidade e reversões nas bandas extremas.
+   - Classifica a posição do preço em relação ao canal: **Dentro do Canal**, **Rompeu Superior** ou **Rompeu Inferior** (fechamento além da banda, não apenas toque) - exibido no dashboard junto com a distância em desvios-padrão (σ) da média.
 
 5. **Rompimento de Canal (Donchian 20)**:
    - Compara o preço com a máxima/mínima dos 20 períodos anteriores (excluindo a barra atual).

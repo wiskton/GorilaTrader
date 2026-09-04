@@ -212,6 +212,7 @@ def snapshot_payload(item: MarketData) -> dict:
         "obv_trend": item.obv_trend,
         "ichimoku_bias": item.ichimoku_bias,
         "bb_zscore": item.bb_zscore,
+        "bollinger_status": item.bollinger_status,
         "reasons": item.reasons,
     }
 
