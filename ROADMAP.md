@@ -38,6 +38,8 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Painel de oscilador sincronizado (RSI com linhas de referência 20/30/70/80, MACD histograma+linhas, ou OBV), selecionável por dropdown
 - [x] Barra lateral com sinal atual, score, Stop Loss/Take Profits e fatores técnicos, atualizando junto com o gráfico
 - [x] `python3 gorilatrader.py --serve [--port 8000] [--host 0.0.0.0]`, dependências opcionais (`fastapi`, `uvicorn`) só exigidas ao usar `--serve`
+- [x] `run-web.sh` + atalho **GorilaTrader Web** no menu de aplicativos (sobe o servidor e abre o navegador automaticamente)
+- [x] `install-desktop.sh` + templates em `desktop/` - instala os atalhos (terminal e web) resolvendo os caminhos automaticamente, funciona em qualquer máquina/usuário sem editar nada à mão
 
 ---
 

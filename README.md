@@ -167,6 +167,24 @@ python3 gorilatrader.py --serve
 ```
 Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Charts](https://github.com/tradingview/lightweight-charts), open-source da própria TradingView) com overlays configuráveis (EMA9/21/50/200, Bandas de Bollinger, Canal Donchian, Nuvem de Ichimoku) e um painel de oscilador (RSI/MACD/OBV) sincronizado. A barra lateral mostra sinal, score, Stop Loss/Take Profits e os fatores técnicos do ativo selecionado - atualiza sozinho a cada 20s. Use `--port` para trocar a porta e `--host 0.0.0.0` para acessar de outro dispositivo na rede.
 
+Ou clique no atalho **GorilaTrader Web** no menu de aplicativos (veja abaixo) - ele sobe o servidor e já abre o navegador automaticamente:
+```bash
+./run-web.sh
+```
+
+---
+
+## 🖱️ Atalhos no Menu de Aplicativos (Linux)
+
+O projeto pode instalar dois atalhos no menu de aplicativos (testado no Pop!_OS/COSMIC, funciona em qualquer desktop freedesktop.org-compatible):
+- **GorilaTrader** - abre o dashboard no terminal (`run.sh`).
+- **GorilaTrader Web** - sobe o dashboard web e abre o navegador (`run-web.sh`).
+
+```bash
+./install-desktop.sh
+```
+O script resolve os caminhos automaticamente a partir de onde o projeto foi clonado - não precisa editar nada manualmente, mesmo se você mover a pasta depois (é só rodar de novo).
+
 ---
 
 ## 📊 Classificação dos Sinais
@@ -188,7 +206,10 @@ GorilaTrader/
 ├── gorilatrader.py         # Motor de análise + dashboard no terminal (Rich)
 ├── webserver.py            # Backend do dashboard web (FastAPI) - reaproveita o motor acima
 ├── web/index.html          # Frontend do dashboard web (Lightweight Charts, sem build step)
-├── run.sh                  # Script de inicialização (abre terminal se clicado fora de um)
+├── run.sh                  # Inicia o dashboard no terminal (abre terminal se clicado fora de um)
+├── run-web.sh              # Inicia o dashboard web e abre o navegador
+├── install-desktop.sh      # Instala os atalhos no menu de aplicativos
+├── desktop/                # Templates dos atalhos .desktop (usados pelo install-desktop.sh)
 ├── requirements.txt        # Dependências Python
 ├── config.example.json     # Modelo de configuração (copie para config.json)
 ├── gorilatrader.png        # Ícone pixel art do app

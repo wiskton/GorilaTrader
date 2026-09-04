@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=GorilaTrader
+GenericName=Monitor Quantitativo Cripto
+Comment=Monitor quantitativo em tempo real de Bitcoin, Ethereum, Solana, Pepe e Hyperliquid com alertas sonoros
+Exec=__PROJECT_DIR__/run.sh
+Icon=__ICON_PATH__
+Path=__PROJECT_DIR__
+Terminal=true
+Categories=Office;Finance;Network;ConsoleOnly;
+Keywords=trader;gorilatrader;crypto;cripto;investidor;macaco;gorila;ape;bitcoin;btc;eth;sol;pepe;hype;
+StartupNotify=true
+StartupWMClass=gorilatrader

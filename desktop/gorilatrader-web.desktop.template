@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=GorilaTrader Web
+GenericName=Dashboard Web de Cripto (Gráfico)
+Comment=Dashboard web com gráfico profissional estilo TradingView e indicadores em tempo real (BTC, ETH, SOL, PEPE, HYPE)
+Exec=__PROJECT_DIR__/run-web.sh
+Icon=__ICON_PATH__
+Path=__PROJECT_DIR__
+Terminal=true
+Categories=Office;Finance;Network;
+Keywords=trader;gorilatrader;crypto;cripto;chart;grafico;tradingview;dashboard;investidor;macaco;gorila;bitcoin;btc;eth;sol;pepe;hype;
+StartupNotify=true
+StartupWMClass=gorilatrader-web
