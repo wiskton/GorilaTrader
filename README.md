@@ -78,7 +78,7 @@ O score final varia de **-100 a +100** e classifica o sinal (veja a tabela mais 
 
 ## 📨 Notificações no Telegram
 
-Todos os avisos (sinais de COMPRA/VENDA, RSI estourado e rompimento forte de Bollinger) também podem ser enviados para um chat do Telegram, além do apito local.
+Todos os avisos (sinais de COMPRA/VENDA, RSI estourado e rompimento forte de Bollinger) também podem ser enviados para um chat do Telegram, além do apito local - **tanto rodando o dashboard no terminal quanto o dashboard web** (`--serve` roda um monitor de alertas em segundo plano, independente da interface usada para visualizar).
 
 1. Crie um bot com o [@BotFather](https://t.me/BotFather) e copie o token.
 2. Descubra o `chat_id` (fale com o bot e use o [@userinfobot](https://t.me/userinfobot), ou acesse `https://api.telegram.org/bot<TOKEN>/getUpdates` depois de mandar uma mensagem ao bot).

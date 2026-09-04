@@ -12,19 +12,60 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+from contextlib import asynccontextmanager
 from typing import List, Optional
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from gorilatrader import ASSETS, CryptoAnalyzer, MarketData, logger
-
-app = FastAPI(title="GorilaTrader Web")
+from gorilatrader import (
+    ASSETS,
+    TELEGRAM_CFG,
+    CryptoAnalyzer,
+    GorilaTraderTerminal,
+    MarketData,
+    logger,
+    resolve_telegram_credentials,
+)
 
 BAR_SECONDS = 3600  # candles de 1h
 WS_INTERVAL_SECONDS = 20  # cadência de push do WebSocket, mesma ordem do terminal
+ALERT_CHECK_INTERVAL_SECONDS = 60  # cadência do monitor de alertas em segundo plano
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+
+# O dashboard web é só visualização - sem este monitor rodando em segundo
+# plano, sinais de COMPRA/VENDA e alertas extremos (RSI/Bollinger) nunca
+# disparariam (nem apito, nem Telegram) enquanto só o `--serve` estivesse no
+# ar. Reaproveita a mesma lógica de check_and_alert/check_extreme_alerts do
+# terminal, então TODO alerta gerado - venha do terminal ou do dashboard web -
+# passa pelo mesmo caminho e vai para o Telegram (se configurado).
+_telegram_token, _telegram_chat_id = resolve_telegram_credentials(TELEGRAM_CFG)
+alert_monitor = GorilaTraderTerminal(
+    sound_enabled=True,
+    telegram_token=_telegram_token,
+    telegram_chat_id=_telegram_chat_id,
+)
+_alert_data_map: dict = {}
+
+
+async def _alert_monitor_loop():
+    while True:
+        try:
+            await asyncio.to_thread(alert_monitor.refresh, _alert_data_map)
+        except Exception:
+            logger.exception("Falha no loop de monitoramento de alertas do dashboard web")
+        await asyncio.sleep(ALERT_CHECK_INTERVAL_SECONDS)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_alert_monitor_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="GorilaTrader Web", lifespan=lifespan)
 
 
 def _clean(value) -> Optional[float]:

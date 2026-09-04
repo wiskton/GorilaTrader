@@ -47,6 +47,7 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] `CryptoAnalyzer.analyze_dataframe` aceita DataFrame direto (sem rede), o que tornou os testes possíveis
 - [x] `requirements-dev.txt` + `pytest.ini`
 - [x] Dashboard web trocou o polling (20s) por **WebSocket** (`/ws/{ativo}`) - o servidor empurra gráfico + snapshot periodicamente, com reconexão automática no frontend se a conexão cair
+- [x] `--serve` agora roda um monitor de alertas em segundo plano (mesma lógica de `check_and_alert`/`check_extreme_alerts` do terminal) - antes, alertas (apito + Telegram) só disparavam com o dashboard do terminal aberto; agora disparam também usando só o dashboard web
 
 ---
 
