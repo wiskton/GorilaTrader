@@ -32,6 +32,7 @@ from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
+from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
@@ -186,6 +187,63 @@ def resolve_telegram_credentials(telegram_cfg: dict) -> Tuple[Optional[str], Opt
 
 
 ASSETS, WEIGHTS, TELEGRAM_CFG, PAPER_TRADING_CFG = load_config()
+
+# ---------------------------------------------------------------------------
+# Seleção de ativos digitada pela pessoa (--assets ou prompt interativo no
+# terminal), sem precisar editar config.json.
+# ---------------------------------------------------------------------------
+
+
+def _detect_display_decimals(price: float) -> int:
+    """Heurística de casas decimais pra exibição a partir do preço - mesmo
+    espírito de BTC (2 casas) vs. PEPE (8 casas): quanto menor o preço
+    unitário, mais casas decimais precisa pra não arredondar tudo pra zero."""
+    if price >= 1:
+        return 2
+    if price >= 0.01:
+        return 4
+    if price >= 0.0001:
+        return 6
+    return 8
+
+
+def resolve_assets_from_tickers(raw: str, console: Optional[Console] = None) -> dict:
+    """Constrói um dict de ativos (mesmo formato de DEFAULT_ASSETS/config.json)
+    a partir de uma lista de tickers digitados pela pessoa (ex.: "BTC, eth, doge").
+
+    Um ticker já conhecido (nos ativos atualmente configurados ou nos padrões
+    embutidos) reaproveita nome/exchange/ícone/decimais já curados. Um ticker
+    novo assume par USDT na Binance spot e detecta as casas decimais de
+    exibição buscando o preço atual - se a busca falhar, cai para 2 casas e
+    avisa (o símbolo pode simplesmente não existir na Binance)."""
+    tickers = [t.strip().upper() for t in raw.replace(";", ",").split(",") if t.strip()]
+    resolved: dict = {}
+    for ticker in tickers:
+        if ticker in ASSETS:
+            resolved[ticker] = ASSETS[ticker]
+        elif ticker in DEFAULT_ASSETS:
+            resolved[ticker] = DEFAULT_ASSETS[ticker]
+        else:
+            symbol = f"{ticker}USDT"
+            df = CryptoAnalyzer.fetch_klines(symbol, "binance_spot", interval="1h", limit=2)
+            if df is not None and len(df):
+                decimals = _detect_display_decimals(float(df["close"].iloc[-1]))
+            else:
+                decimals = 2
+                if console:
+                    console.print(
+                        f"[yellow]⚠ Não encontrei {symbol} na Binance agora - "
+                        f"vou incluir {ticker} mesmo assim, mas pode não ter dados.[/yellow]"
+                    )
+            resolved[ticker] = {
+                "name": ticker,
+                "symbol": symbol,
+                "exchange": "binance_spot",
+                "icon": "🪙",
+                "decimals": decimals,
+            }
+    return resolved
+
 
 # ---------------------------------------------------------------------------
 # Persistência do Histórico de Alertas (sobrevive a reinícios do programa)
@@ -1020,12 +1078,9 @@ class GorilaTraderTerminal:
         return data_map
 
     def format_price(self, price: float, decimals: int) -> str:
-        if decimals >= 6:
-            return f"${price:.8f}"
-        elif decimals == 3:
-            return f"${price:.3f}"
-        else:
+        if decimals <= 2:
             return f"${price:,.2f}"
+        return f"${price:.{decimals}f}"
 
     def build_dashboard(self, data_map: Dict[str, MarketData], countdown: int) -> Layout:
         layout = Layout()
@@ -1489,8 +1544,33 @@ def main():
         action="store_true",
         help="Apaga o histórico do modo papel (paper_trades.json) e encerra",
     )
+    parser.add_argument(
+        "--assets",
+        metavar="TICKERS",
+        help="Criptos a acompanhar nesta execução, separadas por vírgula (ex.: BTC,ETH,DOGE) - "
+        "sobrepõe os ativos do config.json sem editar o arquivo. Sem esta flag, o terminal "
+        "pergunta interativamente quais criptos acompanhar (Enter usa os ativos configurados).",
+    )
 
     args = parser.parse_args()
+
+    global ASSETS
+    headless_mode = bool(
+        args.backtest or args.serve or args.paper_report or args.reset_paper_trading
+        or args.test_telegram or args.test_sound
+    )
+    if args.assets:
+        ASSETS = resolve_assets_from_tickers(args.assets, console=Console())
+    elif not headless_mode and sys.stdin.isatty():
+        console = Console()
+        raw = Prompt.ask(
+            "[bold cyan]🦍 Quais criptos você quer acompanhar?[/bold cyan] "
+            "[dim](ex.: BTC,ETH,DOGE — Enter para usar os ativos configurados)[/dim]",
+            default="",
+            console=console,
+        )
+        if raw.strip():
+            ASSETS = resolve_assets_from_tickers(raw, console=console)
 
     if args.backtest:
         console = Console()

@@ -92,6 +92,14 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Nova seção `paper_trading` em `config.json` (`enabled`, `max_holding_hours`) - liga/desliga e ajusta o timeout tanto no terminal quanto no `--serve`
 - [x] 21 novos testes (motor de fetch das duas exchanges novas, engine do modo papel: abertura na transição de sinal, uma posição por ativo, resolução STOP/TP2/TP1-parcial/timeout em ambas direções, persistência, resumo) - 97 testes no total
 
+## ✅ v1.9 — Escolha de Ativos na Hora (entregue)
+
+- [x] Prompt interativo ao abrir o terminal (`Prompt.ask` do Rich) perguntando quais criptos acompanhar - Enter mantém os ativos do `config.json`/padrões; só aparece em terminal interativo (`sys.stdin.isatty()`), nunca trava `--serve`, `--backtest`, `--paper-report`, `--reset-paper-trading`, `--test-telegram` ou `--test-sound` esperando input
+- [x] Flag `--assets BTC,ETH,DOGE` equivalente por linha de comando, pulando o prompt - funciona em qualquer modo (inclusive `--serve`/`--backtest`), útil pra scripts/atalhos
+- [x] `resolve_assets_from_tickers`: ticker já conhecido (nos ativos atuais ou nos padrões embutidos) reaproveita nome/ícone/exchange/decimais já curados; ticker novo assume par `TICKERUSDT` na Binance spot e detecta as casas decimais de exibição pelo preço atual (heurística por ordem de grandeza, mesmo espírito de BTC vs. PEPE) - se o par não existir, avisa e segue mesmo assim
+- [x] 🐛 Corrigido de quebra: `format_price`/`fmt_price`/`_format_price` (terminal, backtest, modo papel) e `fmtPrice` (dashboard web) só tratavam 2, 3 ou 8 casas decimais como casos especiais - qualquer outro valor (ex.: as 4 ou 6 casas que a detecção automática podia gerar) caía sempre em 2 casas fixas, arredondando o preço de ativos de valor baixo pra `$0.00`. Generalizado pra usar as casas decimais recebidas diretamente.
+- [x] 9 novos testes (heurística de casas decimais, reaproveitamento de ativo conhecido, montagem automática de ativo novo, fallback e aviso quando o símbolo não existe) - 106 testes no total
+
 ---
 
 ## 🚧 Próximos Passos

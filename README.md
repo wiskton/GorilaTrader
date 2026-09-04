@@ -119,6 +119,20 @@ Edite `config.json` (ignorado pelo git) para:
 
 Qualquer chave omitida usa o valor padrão - não é preciso repetir tudo, só o que quiser mudar.
 
+### Escolher as criptos na hora, sem editar `config.json`
+
+Pra trocar os ativos rapidinho (sem mexer em arquivo), o terminal também aceita:
+
+```bash
+# Prompt interativo: ao abrir o terminal, ele pergunta o que acompanhar (Enter = usa o config.json)
+python3 gorilatrader.py
+
+# Ou direto por flag, pulando o prompt (funciona em qualquer modo, inclusive --serve/--backtest):
+python3 gorilatrader.py --assets BTC,ETH,DOGE
+```
+
+Um ticker que já está no `config.json`/nos padrões (ex.: `BTC`) reaproveita nome, ícone, exchange e casas decimais já curados. Um ticker novo (ex.: `DOGE`) assume automaticamente o par `TICKERUSDT` na Binance spot e detecta as casas decimais de exibição pelo preço atual (preços bem pequenos, tipo PEPE, ganham mais casas pra não arredondar tudo pra zero). Se o par não existir na Binance, o programa avisa e segue mesmo assim (aquele ativo aparece como "Erro de conexão" no dashboard). O prompt só aparece em terminal interativo - `--serve`, `--backtest`, `--paper-report`, `--reset-paper-trading`, `--test-telegram` e `--test-sound` nunca travam esperando input.
+
 ---
 
 ## 📦 Instalação

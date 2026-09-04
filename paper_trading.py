@@ -203,11 +203,9 @@ class PaperTradingEngine:
 
 
 def _format_price(price: float, decimals: int) -> str:
-    if decimals >= 6:
-        return f"${price:.8f}"
-    if decimals == 3:
-        return f"${price:.3f}"
-    return f"${price:,.2f}"
+    if decimals <= 2:
+        return f"${price:,.2f}"
+    return f"${price:.{decimals}f}"
 
 
 def print_paper_trading_report(console, assets: dict, engine: PaperTradingEngine) -> None:

@@ -268,11 +268,9 @@ def print_backtest_report(console, key: str, config: dict, trades: List[Trade], 
     dec = config["decimals"]
 
     def fmt_price(p: float) -> str:
-        if dec >= 6:
-            return f"${p:.8f}"
-        if dec == 3:
-            return f"${p:.3f}"
-        return f"${p:,.2f}"
+        if dec <= 2:
+            return f"${p:,.2f}"
+        return f"${p:.{dec}f}"
 
     header = Table(box=box.SIMPLE, show_header=False, expand=True)
     header.add_column(style="bold cyan", width=20)
