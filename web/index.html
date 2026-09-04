@@ -97,6 +97,7 @@
       <div class="kv"><span>OBV</span><span id="obvVal">—</span></div>
       <div class="kv"><span>Ichimoku</span><span id="ichiVal">—</span></div>
       <div class="kv"><span>Bollinger</span><span id="bbVal">—</span></div>
+      <div class="kv"><span>Tendência 4h</span><span id="mtfVal">—</span></div>
     </div>
     <div class="card">
       <h2>Fatores Técnicos</h2>
@@ -332,6 +333,7 @@ function applySnapshot(d) {
   document.getElementById('ichiVal').textContent = d.ichimoku_bias;
   const bbSigma = (d.bb_zscore >= 0 ? '+' : '') + d.bb_zscore.toFixed(1) + 'σ';
   document.getElementById('bbVal').textContent = `${d.bollinger_status} (${bbSigma})`;
+  document.getElementById('mtfVal').textContent = d.mtf_bias || 'indisponível';
 
   const reasonsEl = document.getElementById('reasons');
   reasonsEl.innerHTML = '';

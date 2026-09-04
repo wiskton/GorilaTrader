@@ -55,7 +55,12 @@ No gráfico de 1h, o GorilaTrader utiliza uma matriz de confluência estatístic
    - Posição do preço em relação à Nuvem (Kumo): acima = viés estrutural de alta, abaixo = viés de baixa, dentro = mercado indefinido.
    - Cruzamento Tenkan-sen / Kijun-sen (TK Cross) como gatilho de entrada.
 
-8. **Gerenciamento de Risco Dinâmico (ATR 14)**:
+8. **Confirmação Multi-Timeframe (4h)**:
+   - Compara o viés imediato de 1h (preço vs. EMA21) com a tendência do candle de 4h (preço vs. EMA50 desse timeframe).
+   - Reforça o score quando os dois concordam; penaliza um sinal de 1h que vai contra a tendência maior.
+   - O candle de 4h é buscado com cache de 15 min (não faz sentido rebuscar a cada atualização de 1h/20s - o candle de 4h só fecha a cada 4 horas).
+
+9. **Gerenciamento de Risco Dinâmico (ATR 14)**:
    - Todo sinal fornece automaticamente:
      - **Preço de Entrada**
      - **Stop Loss (SL)**: `Preço - (1.5 * ATR)` na compra / `Preço + (1.5 * ATR)` na venda

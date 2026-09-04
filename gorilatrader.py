@@ -119,6 +119,7 @@ DEFAULT_WEIGHTS = {
     "obv_divergence": 5,    # Divergência entre OBV e preço
     "ichimoku_cloud": 10,   # Posição do preço em relação à Nuvem de Ichimoku
     "ichimoku_tk_cross": 10,  # Cruzamento Tenkan/Kijun
+    "mtf_confirmation": 15,  # Viés de 1h alinhado (ou não) com a tendência de 4h
 }
 
 API_URLS = {
@@ -402,6 +403,7 @@ class MarketData:
     ichimoku_cloud_top: Optional[float]
     ichimoku_cloud_bottom: Optional[float]
     ichimoku_bias: str  # Acima da Nuvem, Abaixo da Nuvem, Dentro da Nuvem, Indisponível
+    mtf_bias: Optional[str]  # ALTA, BAIXA ou None (tendência do candle de 4h)
     signal: str  # FORTE COMPRA, COMPRA, NEUTRO, VENDA, FORTE VENDA
     score: int  # -100 a +100
     stop_loss: float
@@ -413,6 +415,13 @@ class MarketData:
 
 class CryptoAnalyzer:
     """Análise técnica institucional para o gráfico de 1h."""
+
+    # Cache do candle de timeframe maior (4h) usado no filtro de confirmação
+    # multi-timeframe: um candle de 4h só fecha a cada 4h, então buscá-lo a
+    # cada ciclo de 1h (ou a cada 20-30s no dashboard web) seria desperdício
+    # de requisições. {"SYMBOL:interval": (timestamp_do_fetch, df)}
+    _mtf_cache: Dict[str, Tuple[float, Optional[pd.DataFrame]]] = {}
+    MTF_CACHE_TTL_SECONDS = 900  # 15 min
 
     @staticmethod
     def _fetch_binance(url_key: str, symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
@@ -461,20 +470,44 @@ class CryptoAnalyzer:
         return None
 
     @classmethod
+    def fetch_mtf_klines(cls, symbol: str, exchange: str, interval: str = "4h", limit: int = 120) -> Optional[pd.DataFrame]:
+        """Busca o timeframe maior usado no filtro de confirmação, com cache
+        (ver MTF_CACHE_TTL_SECONDS) para não bater na API a cada atualização."""
+        cache_key = f"{symbol}:{interval}"
+        now = time.time()
+        cached = cls._mtf_cache.get(cache_key)
+        if cached is not None and (now - cached[0]) < cls.MTF_CACHE_TTL_SECONDS:
+            return cached[1]
+
+        df = cls.fetch_klines(symbol, exchange, interval=interval, limit=limit)
+        cls._mtf_cache[cache_key] = (now, df)
+        return df
+
+    @classmethod
     def analyze_asset(cls, key: str, config: dict, weights: Optional[dict] = None) -> Optional[MarketData]:
         df = cls.fetch_klines(config["symbol"], config["exchange"], interval="1h", limit=250)
         if df is None or len(df) < 50:
             logger.warning("Dados insuficientes para %s (%s candles)", key, 0 if df is None else len(df))
             return None
-        return cls.analyze_dataframe(key, config, df, weights)
+        mtf_df = cls.fetch_mtf_klines(config["symbol"], config["exchange"], interval="4h", limit=120)
+        return cls.analyze_dataframe(key, config, df, weights, mtf_df=mtf_df)
 
     @classmethod
     def analyze_dataframe(
-        cls, key: str, config: dict, df: pd.DataFrame, weights: Optional[dict] = None
+        cls,
+        key: str,
+        config: dict,
+        df: pd.DataFrame,
+        weights: Optional[dict] = None,
+        mtf_df: Optional[pd.DataFrame] = None,
     ) -> Optional[MarketData]:
         """Calcula os indicadores e a matriz de confluência a partir de um
         DataFrame de candles já carregado (separado de analyze_asset para
-        permitir testar a lógica de decisão sem depender de rede)."""
+        permitir testar a lógica de decisão sem depender de rede).
+
+        `mtf_df` é opcional: candles de um timeframe maior (ex.: 4h) usados
+        só no filtro de confirmação multi-timeframe - se omitido, esse fator
+        simplesmente não contribui pontuação (score 0, sem razão listada)."""
         if df is None or len(df) < 50:
             return None
         w = weights or WEIGHTS
@@ -619,6 +652,16 @@ class CryptoAnalyzer:
         fresh_tk_bull = float(tenkan.iloc[-2]) <= float(kijun.iloc[-2]) and ich_tenkan > ich_kijun
         fresh_tk_bear = float(tenkan.iloc[-2]) >= float(kijun.iloc[-2]) and ich_tenkan < ich_kijun
 
+        # Filtro de confirmação multi-timeframe: viés do candle de 4h (preço
+        # vs EMA50 desse timeframe) comparado com o viés imediato de 1h
+        # (preço vs EMA21). Reforça o score quando os dois concordam e
+        # penaliza quando o sinal de 1h vai contra a tendência maior.
+        mtf_bias: Optional[str] = None
+        if mtf_df is not None and len(mtf_df) >= 55:
+            mtf_close = mtf_df["close"]
+            mtf_ema50 = mtf_close.ewm(span=50, adjust=False).mean()
+            mtf_bias = "ALTA" if float(mtf_close.iloc[-1]) > float(mtf_ema50.iloc[-1]) else "BAIXA"
+
         # -------------------------------------------------------------------
         # Matriz de Decisão e Confluência Quantitativa (-100 a +100)
         # -------------------------------------------------------------------
@@ -738,6 +781,16 @@ class CryptoAnalyzer:
                 score -= w["ichimoku_tk_cross"]
                 reasons.append("Cruzamento baixista Tenkan/Kijun (Ichimoku)")
 
+        # --- I) CONFIRMAÇÃO MULTI-TIMEFRAME (4H) ---
+        if mtf_bias is not None:
+            local_bias = "ALTA" if price > e21 else "BAIXA"
+            if local_bias == mtf_bias:
+                score += w["mtf_confirmation"]
+                reasons.append(f"Tendência de 4h ({mtf_bias.lower()}) confirma o viés de 1h")
+            else:
+                score -= w["mtf_confirmation"]
+                reasons.append(f"Tendência de 4h ({mtf_bias.lower()}) diverge do 1h - contra a tendência maior")
+
         # Normaliza pontuação
         score = max(-100, min(100, score))
 
@@ -806,6 +859,7 @@ class CryptoAnalyzer:
             ichimoku_cloud_top=cloud_top,
             ichimoku_cloud_bottom=cloud_bottom,
             ichimoku_bias=ichimoku_bias,
+            mtf_bias=mtf_bias,
             signal=signal,
             score=score,
             stop_loss=sl,
@@ -1210,6 +1264,9 @@ class GorilaTraderTerminal:
                 f"Tenkan: {self.format_price(item.ichimoku_tenkan, dec)} | Kijun: {self.format_price(item.ichimoku_kijun, dec)} "
                 f"| Nuvem: {cloud_range} | Posição: [bold]{item.ichimoku_bias}[/bold]",
             )
+
+            mtf_str = f"[bold]{item.mtf_bias}[/bold]" if item.mtf_bias else "[dim]indisponível[/dim]"
+            table.add_row("Tendência Maior (4h)", f"Viés do candle de 4h: {mtf_str}")
 
             table.add_row("Gerenciamento de Risco", f"Stop Loss: [bold red]{sl_str}[/bold red] | Take Profit 1: [bold green]{tp1_str}[/bold green] | Take Profit 2: [bold green]{tp2_str}[/bold green]")
 

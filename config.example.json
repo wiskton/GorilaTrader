@@ -24,7 +24,8 @@
     "obv_confirm": 8,
     "obv_divergence": 5,
     "ichimoku_cloud": 10,
-    "ichimoku_tk_cross": 10
+    "ichimoku_tk_cross": 10,
+    "mtf_confirmation": 15
   },
 
   "telegram": {

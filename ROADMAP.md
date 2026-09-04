@@ -68,12 +68,19 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] `python3 gorilatrader.py --backtest ATIVO [--backtest-days N]` com relatório de taxa de acerto, R médio e retorno % por direção (COMPRA/VENDA)
 - [x] 12 testes cobrindo resolução de trade (SL/TP1/TP2/timeout/desempate) e paginação do histórico - um deles pegou um bug real de sobreposição de trades antes de ir para o ar (o loop principal nunca pulava para depois da resolução da entrada anterior)
 
+## ✅ v1.6 — Confirmação Multi-Timeframe (entregue)
+
+- [x] Novo fator na matriz: viés do candle de **4h** (preço vs. EMA50 desse timeframe) comparado com o viés imediato de 1h (preço vs. EMA21) - reforça o score quando concordam, penaliza quando o sinal de 1h vai contra a tendência maior
+- [x] `CryptoAnalyzer.fetch_mtf_klines` com cache de 15 min - o candle de 4h só fecha a cada 4h, então não faz sentido rebuscar a cada ciclo de 1h/20s
+- [x] `analyze_dataframe` aceita `mtf_df` opcional (mantém a função pura/testável sem rede); `analyze_asset` busca e injeta automaticamente
+- [x] Exibido no relatório detalhado (`--once`) e na barra lateral do dashboard web; novo peso `mtf_confirmation` configurável em `config.json`
+- [x] 7 testes cobrindo alinhamento/divergência em ambas direções, ausência de dado de 4h, histórico insuficiente e cache
+
 ---
 
 ## 🚧 Próximos Passos
 
 ### Médio prazo
-- [ ] Filtro de confirmação multi-timeframe (ex.: viés de 4h/1D para filtrar sinais de 1h contra a tendência maior)
 - [ ] Sombreamento visual entre as bandas (Bollinger/Donchian/Nuvem de Ichimoku) no gráfico web, hoje são só linhas
 
 ### Longo prazo / explorações
