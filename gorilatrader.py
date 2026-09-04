@@ -324,23 +324,33 @@ class TelegramNotifier:
                 "ou a seção 'telegram' em config.json) - alertas não serão enviados para o Telegram."
             )
 
+    def send_sync(self, text: str) -> Tuple[bool, str]:
+        """Envia a mensagem e espera a resposta - usado por --test-telegram
+        para reportar sucesso/falha reais em vez de assumir sucesso."""
+        if not self.enabled:
+            return False, "Telegram não configurado."
+        try:
+            url = f"{self.API_BASE}/bot{self.bot_token}/sendMessage"
+            r = requests.post(
+                url,
+                json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                return True, "OK"
+            return False, f"HTTP {r.status_code}: {r.text[:300]}"
+        except Exception as exc:
+            return False, str(exc)
+
     def send(self, text: str) -> None:
         """Envia a mensagem de forma assíncrona (não bloqueia o loop do dashboard)."""
         if not self.enabled:
             return
 
         def _runner():
-            try:
-                url = f"{self.API_BASE}/bot{self.bot_token}/sendMessage"
-                r = requests.post(
-                    url,
-                    json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
-                    timeout=8,
-                )
-                if r.status_code != 200:
-                    logger.warning("Falha ao enviar alerta ao Telegram: HTTP %s - %s", r.status_code, r.text[:200])
-            except Exception:
-                logger.warning("Erro ao enviar alerta ao Telegram", exc_info=True)
+            ok, detail = self.send_sync(text)
+            if not ok:
+                logger.warning("Falha ao enviar alerta ao Telegram: %s", detail)
 
         threading.Thread(target=_runner, daemon=True).start()
 
@@ -1285,9 +1295,11 @@ def main():
             console.print("[red]❌ Telegram não configurado. Defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID (ou config.json).[/red]")
             return
         console.print("[bold yellow]📨 Enviando mensagem de teste para o Telegram...[/bold yellow]")
-        notifier.send("🦍 <b>GorilaTrader</b>\nMensagem de teste - a integração com o Telegram está funcionando!")
-        time.sleep(2)
-        console.print("[bold green]✅ Mensagem enviada (verifique o Telegram).[/bold green]")
+        ok, detail = notifier.send_sync("🦍 <b>GorilaTrader</b>\nMensagem de teste - a integração com o Telegram está funcionando!")
+        if ok:
+            console.print("[bold green]✅ Mensagem enviada com sucesso (verifique o Telegram).[/bold green]")
+        else:
+            console.print(f"[red]❌ Falha ao enviar: {detail}[/red]")
         return
 
     if args.test_sound:
