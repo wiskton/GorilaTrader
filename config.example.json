@@ -1,6 +1,7 @@
 {
   "_comment": "Copie este arquivo para config.json para customizar sem editar o código. Todas as seções são opcionais - o que não for definido usa o padrão embutido.",
 
+  "_comment_exchange": "exchange aceita: binance_spot, binance_futures (com fallback automático pra Bybit se a Binance falhar), okx e kraken. O formato do 'symbol' muda por exchange: BTCUSDT (binance/bybit), BTC-USDT (okx, com hífen), XBTUSDT (kraken, BTC vira XBT).",
   "assets": {
     "BTC": { "name": "Bitcoin", "symbol": "BTCUSDT", "exchange": "binance_spot", "icon": "₿", "decimals": 2 },
     "ETH": { "name": "Ethereum", "symbol": "ETHUSDT", "exchange": "binance_spot", "icon": "⟠", "decimals": 2 },
@@ -8,6 +9,8 @@
     "PEPE": { "name": "Pepe", "symbol": "PEPEUSDT", "exchange": "binance_spot", "icon": "🐸", "decimals": 8 },
     "HYPE": { "name": "Hyperliquid", "symbol": "HYPEUSDT", "exchange": "binance_futures", "icon": "⚡", "decimals": 3 }
   },
+
+  "_comment_exchange_examples": "Exemplos (não usados por padrão) de ativos configurados via OKX/Kraken como fonte de dados: { \"name\": \"Bitcoin\", \"symbol\": \"BTC-USDT\", \"exchange\": \"okx\", \"icon\": \"₿\", \"decimals\": 2 } ou { \"name\": \"Bitcoin\", \"symbol\": \"XBTUSDT\", \"exchange\": \"kraken\", \"icon\": \"₿\", \"decimals\": 2 }",
 
   "weights": {
     "trend_full": 35,
@@ -32,5 +35,11 @@
     "_comment": "Prefira as variáveis de ambiente TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID em vez de colocar o token aqui. Se usar este arquivo, NÃO o versione (config.json já está no .gitignore).",
     "bot_token": "",
     "chat_id": ""
+  },
+
+  "paper_trading": {
+    "_comment": "Modo papel: simula a execução dos sinais (sem enviar ordem real) para acompanhar a performance da estratégia com o tempo. Veja --paper-report, --reset-paper-trading e --no-paper-trading.",
+    "enabled": true,
+    "max_holding_hours": 200
   }
 }

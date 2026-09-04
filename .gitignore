@@ -9,3 +9,4 @@ venv/
 # Estado/segredos locais - nunca versionar
 config.json
 alerts_history.json
+paper_trades.json

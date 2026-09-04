@@ -126,14 +126,27 @@ API_URLS = {
     "binance_spot": "https://api.binance.com/api/v3/klines",
     "binance_futures": "https://fapi.binance.com/fapi/v1/klines",
     "bybit_spot": "https://api.bybit.com/v5/market/kline",
+    "okx": "https://www.okx.com/api/v5/market/candles",
+    "kraken": "https://api.kraken.com/0/public/OHLC",
 }
+
+# Formato do intervalo varia por exchange: Binance/Bybit usam "1h"/"4h" direto,
+# OKX usa "1H"/"4H" e Kraken usa minutos como inteiro.
+_OKX_INTERVAL_MAP = {"1h": "1H", "4h": "4H"}
+_KRAKEN_INTERVAL_MAP = {"1h": 60, "4h": 240}
 
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 
 
-def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict]:
-    """Carrega ativos, pesos e credenciais do Telegram de config.json, mesclando
-    com os padrões.
+DEFAULT_PAPER_TRADING_CFG = {
+    "enabled": True,
+    "max_holding_hours": 200,  # mesma janela do backtest (MAX_HOLDING_BARS_DEFAULT, em candles de 1h)
+}
+
+
+def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict, dict]:
+    """Carrega ativos, pesos, credenciais do Telegram e config do modo papel
+    de config.json, mesclando com os padrões.
 
     Se o arquivo não existir ou estiver malformado, usa somente os padrões
     embutidos - o programa nunca deixa de funcionar por causa de config.json.
@@ -141,16 +154,17 @@ def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict]:
     assets = dict(DEFAULT_ASSETS)
     weights = dict(DEFAULT_WEIGHTS)
     telegram: dict = {}
+    paper_trading = dict(DEFAULT_PAPER_TRADING_CFG)
 
     if not os.path.exists(path):
-        return assets, weights, telegram
+        return assets, weights, telegram, paper_trading
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as exc:
         logger.error("Falha ao ler %s: %s. Usando configuração padrão.", path, exc)
-        return assets, weights, telegram
+        return assets, weights, telegram, paper_trading
 
     if isinstance(data.get("assets"), dict) and data["assets"]:
         assets = data["assets"]
@@ -158,8 +172,10 @@ def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict]:
         weights.update(data["weights"])
     if isinstance(data.get("telegram"), dict):
         telegram = data["telegram"]
+    if isinstance(data.get("paper_trading"), dict):
+        paper_trading.update(data["paper_trading"])
 
-    return assets, weights, telegram
+    return assets, weights, telegram, paper_trading
 
 
 def resolve_telegram_credentials(telegram_cfg: dict) -> Tuple[Optional[str], Optional[str]]:
@@ -169,7 +185,7 @@ def resolve_telegram_credentials(telegram_cfg: dict) -> Tuple[Optional[str], Opt
     return token, chat_id
 
 
-ASSETS, WEIGHTS, TELEGRAM_CFG = load_config()
+ASSETS, WEIGHTS, TELEGRAM_CFG, PAPER_TRADING_CFG = load_config()
 
 # ---------------------------------------------------------------------------
 # Persistência do Histórico de Alertas (sobrevive a reinícios do programa)
@@ -177,6 +193,9 @@ ASSETS, WEIGHTS, TELEGRAM_CFG = load_config()
 
 ALERTS_HISTORY_PATH = os.path.join(DATA_DIR, "alerts_history.json")
 MAX_HISTORY_ENTRIES = 200
+
+# Estado do modo papel (posições simuladas abertas/fechadas) - ver paper_trading.py
+PAPER_TRADES_PATH = os.path.join(DATA_DIR, "paper_trades.json")
 
 
 def load_alert_history(path: str = ALERTS_HISTORY_PATH) -> List[dict]:
@@ -450,8 +469,74 @@ class CryptoAnalyzer:
             df[col] = df[col].astype(float)
         return df
 
+    @staticmethod
+    def _fetch_okx(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
+        """`symbol` no formato nativo da OKX (ex.: BTC-USDT, com hífen)."""
+        bar = _OKX_INTERVAL_MAP.get(interval, interval.upper())
+        url = f"{API_URLS['okx']}?instId={symbol}&bar={bar}&limit={limit}"
+        r = requests.get(url, timeout=8)
+        r.raise_for_status()
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = rows[::-1]  # OKX retorna do candle mais recente para o mais antigo
+        df = pd.DataFrame(rows, columns=[
+            "open_time", "open", "high", "low", "close", "vol", "vol_ccy", "vol_ccy_quote", "confirm"
+        ])
+        for col in ["open", "high", "low", "close", "vol"]:
+            df[col] = df[col].astype(float)
+        return df
+
+    @staticmethod
+    def _fetch_kraken(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
+        """`symbol` no formato nativo da Kraken (ex.: XBTUSDT). A Kraken devolve
+        os candles sob uma chave própria do par (que pode não ser idêntica ao
+        `pair` pedido, ex.: BTC -> XBT) - por isso pegamos a única lista de
+        candles do resultado, ignorando a chave "last"."""
+        kraken_interval = _KRAKEN_INTERVAL_MAP.get(interval, 60)
+        url = f"{API_URLS['kraken']}?pair={symbol}&interval={kraken_interval}"
+        r = requests.get(url, timeout=8)
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("error"):
+            logger.warning("Kraken retornou erro para %s: %s", symbol, payload["error"])
+            return None
+
+        candle_lists = [v for k, v in payload.get("result", {}).items() if k != "last"]
+        if not candle_lists or not candle_lists[0]:
+            return None
+        rows = candle_lists[0]
+        if limit:
+            rows = rows[-limit:]
+
+        df = pd.DataFrame(rows, columns=["open_time", "open", "high", "low", "close", "vwap", "vol", "count"])
+        df["open_time"] = (df["open_time"].astype(float) * 1000).astype("int64")  # segundos -> ms
+        for col in ["open", "high", "low", "close", "vol"]:
+            df[col] = df[col].astype(float)
+        return df
+
     @classmethod
     def fetch_klines(cls, symbol: str, exchange: str, interval: str = "1h", limit: int = 100) -> Optional[pd.DataFrame]:
+        if exchange == "okx":
+            try:
+                df = cls._fetch_okx(symbol, interval, limit)
+                if df is None:
+                    logger.error("OKX não retornou candles para %s. Sem dados disponíveis.", symbol)
+                return df
+            except Exception as exc:
+                logger.error("OKX falhou para %s: %s. Sem dados disponíveis.", symbol, exc)
+                return None
+
+        if exchange == "kraken":
+            try:
+                df = cls._fetch_kraken(symbol, interval, limit)
+                if df is None:
+                    logger.error("Kraken não retornou candles para %s. Sem dados disponíveis.", symbol)
+                return df
+            except Exception as exc:
+                logger.error("Kraken falhou para %s: %s. Sem dados disponíveis.", symbol, exc)
+                return None
+
         url_key = "binance_futures" if exchange == "binance_futures" else "binance_spot"
         try:
             return cls._fetch_binance(url_key, symbol, interval, limit)
@@ -883,6 +968,8 @@ class GorilaTraderTerminal:
         use_voice: bool = False,
         telegram_token: Optional[str] = None,
         telegram_chat_id: Optional[str] = None,
+        paper_trading_enabled: bool = True,
+        paper_trading_max_holding_hours: int = 200,
     ):
         self.interval = interval
         self.sound = SoundEngine(enabled=sound_enabled, use_voice=use_voice)
@@ -894,6 +981,12 @@ class GorilaTraderTerminal:
         self.last_bb_extreme: Dict[str, Optional[str]] = {}
         self.stale: Dict[str, bool] = {}
         self.iteration = 0
+
+        self.paper: Optional["PaperTradingEngine"] = None
+        if paper_trading_enabled:
+            from paper_trading import PaperTradingEngine  # import tardio: evita ciclo de import no nível de módulo
+
+            self.paper = PaperTradingEngine(PAPER_TRADES_PATH, max_holding_hours=paper_trading_max_holding_hours)
 
     def fetch_all(self) -> Dict[str, Optional[MarketData]]:
         """Busca e analisa todos os ativos em paralelo (evita ~5x latência sequencial)."""
@@ -920,6 +1013,8 @@ class GorilaTraderTerminal:
                 self.stale[key] = False
                 self.check_and_alert(res)
                 self.check_extreme_alerts(res)
+                if self.paper is not None:
+                    self.paper.update(res)
             else:
                 self.stale[key] = True
         return data_map
@@ -1142,17 +1237,23 @@ class GorilaTraderTerminal:
         self.telegram.send(text)
 
     def check_and_alert(self, item: MarketData):
-        """Verifica se houve mudança de sinal (COMPRA/VENDA) e dispara o aviso."""
+        """Verifica se houve mudança de sinal (COMPRA/VENDA), dispara o aviso e
+        abre a posição simulada do modo papel (se habilitado) na mesma transição."""
         key = item.asset_key
         last_sig = self.last_signals.get(key)
         current_sig = item.signal
+        is_fresh_buy = current_sig in ("COMPRA", "FORTE COMPRA") and last_sig not in ("COMPRA", "FORTE COMPRA")
+        is_fresh_sell = current_sig in ("VENDA", "FORTE VENDA") and last_sig not in ("VENDA", "FORTE VENDA")
 
-        if current_sig in ("COMPRA", "FORTE COMPRA") and last_sig not in ("COMPRA", "FORTE COMPRA"):
+        if is_fresh_buy:
             reason_summary = " · ".join(item.reasons[:2]) if item.reasons else "Confluência altista confirmada"
             self._record_alert(item, current_sig, bullish=True, detail=reason_summary)
-        elif current_sig in ("VENDA", "FORTE VENDA") and last_sig not in ("VENDA", "FORTE VENDA"):
+        elif is_fresh_sell:
             reason_summary = " · ".join(item.reasons[:2]) if item.reasons else "Confluência baixista confirmada"
             self._record_alert(item, current_sig, bullish=False, detail=reason_summary)
+
+        if self.paper is not None:
+            self.paper.maybe_open(item, is_fresh_buy, is_fresh_sell)
 
         self.last_signals[key] = current_sig
 
@@ -1373,6 +1474,21 @@ def main():
         default=60,
         help="Quantos dias de histórico (candles de 1h) usar no --backtest (padrão: 60)",
     )
+    parser.add_argument(
+        "--no-paper-trading",
+        action="store_true",
+        help="Desativa o modo papel (simulação de execução dos sinais) nesta execução do terminal",
+    )
+    parser.add_argument(
+        "--paper-report",
+        action="store_true",
+        help="Mostra o relatório de performance do modo papel (trades simulados acumulados) e encerra",
+    )
+    parser.add_argument(
+        "--reset-paper-trading",
+        action="store_true",
+        help="Apaga o histórico do modo papel (paper_trades.json) e encerra",
+    )
 
     args = parser.parse_args()
 
@@ -1395,6 +1511,21 @@ def main():
             console.print(f"[red]❌ Falha ao rodar o backtest: {exc}[/red]")
             return
         print_backtest_report(console, key, ASSETS[key], trades, summary)
+        return
+
+    if args.paper_report:
+        console = Console()
+        from paper_trading import PaperTradingEngine, print_paper_trading_report
+
+        engine = PaperTradingEngine(PAPER_TRADES_PATH, max_holding_hours=PAPER_TRADING_CFG.get("max_holding_hours", 200))
+        print_paper_trading_report(console, ASSETS, engine)
+        return
+
+    if args.reset_paper_trading:
+        console = Console()
+        if os.path.exists(PAPER_TRADES_PATH):
+            os.remove(PAPER_TRADES_PATH)
+        console.print("[bold green]✅ Histórico do modo papel apagado.[/bold green]")
         return
 
     if args.serve:
@@ -1446,6 +1577,8 @@ def main():
         use_voice=args.voice,
         telegram_token=telegram_token,
         telegram_chat_id=telegram_chat_id,
+        paper_trading_enabled=PAPER_TRADING_CFG.get("enabled", True) and not args.no_paper_trading,
+        paper_trading_max_holding_hours=PAPER_TRADING_CFG.get("max_holding_hours", 200),
     )
 
     if args.once:

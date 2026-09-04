@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from gorilatrader import (
     ASSETS,
+    PAPER_TRADING_CFG,
     TELEGRAM_CFG,
     CryptoAnalyzer,
     GorilaTraderTerminal,
@@ -39,12 +40,17 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 # disparariam (nem apito, nem Telegram) enquanto só o `--serve` estivesse no
 # ar. Reaproveita a mesma lógica de check_and_alert/check_extreme_alerts do
 # terminal, então TODO alerta gerado - venha do terminal ou do dashboard web -
-# passa pelo mesmo caminho e vai para o Telegram (se configurado).
+# passa pelo mesmo caminho e vai para o Telegram (se configurado). Pela mesma
+# razão, o modo papel (paper_trading.py) também roda aqui - do contrário
+# nenhuma posição simulada abriria/fecharia enquanto só o dashboard web
+# estivesse no ar.
 _telegram_token, _telegram_chat_id = resolve_telegram_credentials(TELEGRAM_CFG)
 alert_monitor = GorilaTraderTerminal(
     sound_enabled=True,
     telegram_token=_telegram_token,
     telegram_chat_id=_telegram_chat_id,
+    paper_trading_enabled=PAPER_TRADING_CFG.get("enabled", True),
+    paper_trading_max_holding_hours=PAPER_TRADING_CFG.get("max_holding_hours", 200),
 )
 _alert_data_map: dict = {}
 

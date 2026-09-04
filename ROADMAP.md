@@ -82,14 +82,23 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Aplicado às Bandas de Bollinger, Canal Donchian e Nuvem de Ichimoku (senkou A/B), respeitando os checkboxes de cada overlay e redesenhando ao trocar de ativo ou alternar visibilidade
 - [x] ⚠️ Não verificado visualmente num navegador real nesta sessão (sem acesso ao Chrome) - a API usada foi confirmada existente na lib exata carregada, mas vale conferir a aparência final
 
+## ✅ v1.8 — Mais Exchanges e Modo Papel (entregue)
+
+- [x] Suporte a **OKX** e **Kraken** como fonte de dados por ativo (`exchange: "okx"` ou `"kraken"` em `config.json`), além de Binance spot/futures (com fallback pra Bybit) - cada exchange tem seu próprio formato de símbolo (`BTC-USDT` na OKX, `XBTUSDT` na Kraken) e de intervalo (`1H`/`4H` na OKX, minutos na Kraken), documentado em `config.example.json`
+- [x] `CryptoAnalyzer.fetch_klines` roteia por `exchange` em vez de assumir Binance+fallback pra tudo - OKX/Kraken retornam `None` e logam o erro em vez de cair num fallback que não faz sentido pra elas
+- [x] **Modo Papel** (`paper_trading.py`): acompanha os sinais ao vivo (terminal ou `--serve`) e simula a execução - abre uma posição no preço do momento quando o sinal muda pra COMPRA/VENDA (mesma regra anti-spam dos apitos), fecha em STOP/TP2/timeout comparando com o preço a cada ciclo, sem enviar ordem real a lugar nenhum
+- [x] Estado persistido em `paper_trades.json` (mesmo padrão de `alerts_history.json`), sobrevive a reinícios e ao volume do Docker
+- [x] `--paper-report` (relatório de performance: taxa de acerto, R médio, retorno % por direção), `--no-paper-trading` (desativa na sessão do terminal) e `--reset-paper-trading` (zera o histórico)
+- [x] Nova seção `paper_trading` em `config.json` (`enabled`, `max_holding_hours`) - liga/desliga e ajusta o timeout tanto no terminal quanto no `--serve`
+- [x] 21 novos testes (motor de fetch das duas exchanges novas, engine do modo papel: abertura na transição de sinal, uma posição por ativo, resolução STOP/TP2/TP1-parcial/timeout em ambas direções, persistência, resumo) - 97 testes no total
+
 ---
 
 ## 🚧 Próximos Passos
 
 ### Longo prazo / explorações
-- [ ] Suporte a mais exchanges como fonte de dados (OKX, Kraken)
-- [ ] Modo "papel" (paper trading) simulando execução das entradas sugeridas para acompanhar performance real da estratégia
 - [ ] Autenticação simples no dashboard web para uso seguro com `--host 0.0.0.0` fora da rede local
+- [ ] Exibir a performance do modo papel também no dashboard web (hoje só via `--paper-report` no terminal)
 
 ---
 

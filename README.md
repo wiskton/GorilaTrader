@@ -67,7 +67,7 @@ No gráfico de 1h, o GorilaTrader utiliza uma matriz de confluência estatístic
      - **Take Profit 1 (TP1)**: Relação Risco:Retorno de ~1:1.33
      - **Take Profit 2 (TP2)**: Relação Risco:Retorno de ~1:2.33
 
-O score final varia de **-100 a +100** e classifica o sinal (veja a tabela mais abaixo). Fontes de dados: Binance (spot/futures) com fallback automático para Bybit em caso de falha de rede.
+O score final varia de **-100 a +100** e classifica o sinal (veja a tabela mais abaixo). Fontes de dados por ativo (configurável em `config.json`): Binance (spot/futures, com fallback automático para Bybit em caso de falha de rede), OKX ou Kraken.
 
 ---
 
@@ -112,9 +112,10 @@ cp config.example.json config.json
 ```
 
 Edite `config.json` (ignorado pelo git) para:
-- **`assets`**: trocar os ativos monitorados (qualquer par `*USDT` da Binance spot ou futures).
+- **`assets`**: trocar os ativos monitorados e a exchange usada como fonte de dados de cada um - `exchange` aceita `binance_spot`, `binance_futures` (ambos com fallback automático para Bybit), `okx` ou `kraken`. O formato do `symbol` muda por exchange: `BTCUSDT` (Binance/Bybit), `BTC-USDT` (OKX, com hífen) ou `XBTUSDT` (Kraken, BTC vira XBT) - veja os exemplos comentados em `config.example.json`.
 - **`weights`**: ajustar a pontuação de cada fator da matriz de confluência (ex.: aumentar o peso do Ichimoku, reduzir o de RSI).
 - **`telegram`**: credenciais do bot (alternativa às variáveis de ambiente).
+- **`paper_trading`**: liga/desliga o modo papel (`enabled`) e o tempo máximo de uma posição simulada aberta (`max_holding_hours`) - veja a seção [📝 Modo Papel](#-modo-papel-paper-trading) abaixo.
 
 Qualquer chave omitida usa o valor padrão - não é preciso repetir tudo, só o que quiser mudar.
 
@@ -232,6 +233,22 @@ Mostra taxa de acerto, R médio (retorno normalizado pelo risco) e retorno % por
 
 ---
 
+## 📝 Modo Papel (Paper Trading)
+
+Diferente do backtest (que roda sobre histórico já fechado), o modo papel acompanha os sinais **ao vivo**: sempre que o sinal de um ativo muda para COMPRA/VENDA (mesma regra anti-spam dos apitos), abre uma posição simulada no preço do momento com o SL/TP1/TP2 exibidos naquele instante, e fecha depois em STOP, TP2 ou timeout por tempo - sem enviar nenhuma ordem real a lugar nenhum. É a forma de acompanhar a performance real da estratégia com o tempo, rodando tanto no terminal quanto no `--serve` (dashboard web).
+
+Vem **ativado por padrão**. Estado persistido em `paper_trades.json` (local, não versionado), sobrevive a reinícios.
+
+```bash
+python3 gorilatrader.py --paper-report          # relatório de performance (posições abertas + fechadas) e encerra
+python3 gorilatrader.py --no-paper-trading      # desativa nesta execução do terminal
+python3 gorilatrader.py --reset-paper-trading   # apaga o histórico do modo papel e encerra
+```
+
+⚠️ Limitação conhecida: a checagem de SL/TP acontece a cada ciclo de atualização (ex.: a cada 20-60s), não em dados de tick - um pavio muito rápido entre duas checagens pode não ser capturado.
+
+---
+
 ## 🐳 Docker (monitoramento 24/7 num servidor/VPS)
 
 A imagem roda o **dashboard web** (`--serve`, que também dispara os alertas) - o modo terminal com apito/voz depende de dispositivos de áudio do host e não faz sentido num container headless.
@@ -250,7 +267,7 @@ Ou com Docker Compose (lê `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` de um arquivo
 docker compose up -d
 ```
 
-O volume em `/data` (controlado por `GORILATRADER_DATA_DIR`) persiste `config.json`, `alerts_history.json` e `gorilatrader.log` entre restarts/rebuilds - sem ele, o histórico reseta a cada `docker compose up`.
+O volume em `/data` (controlado por `GORILATRADER_DATA_DIR`) persiste `config.json`, `alerts_history.json`, `paper_trades.json` e `gorilatrader.log` entre restarts/rebuilds - sem ele, o histórico (incluindo o do modo papel) reseta a cada `docker compose up`.
 
 ---
 
@@ -262,7 +279,8 @@ GorilaTrader/
 ├── webserver.py            # Backend do dashboard web (FastAPI + WebSocket) - reaproveita o motor acima
 ├── web/index.html          # Frontend do dashboard web (Lightweight Charts, sem build step)
 ├── backtest.py             # Motor de backtest (--backtest) sobre histórico real da Binance
-├── tests/                  # Suíte pytest (matriz de confluência, backtest, config, Telegram, histórico)
+├── paper_trading.py        # Motor do modo papel (--paper-report) - simula execução dos sinais ao vivo
+├── tests/                  # Suíte pytest (matriz de confluência, backtest, modo papel, config, Telegram, histórico)
 ├── Dockerfile / docker-compose.yml / .dockerignore  # Empacotamento para servidor/VPS
 ├── run.sh                  # Inicia o dashboard no terminal (abre terminal se clicado fora de um)
 ├── run-web.sh              # Inicia o dashboard web e abre o navegador
@@ -276,7 +294,7 @@ GorilaTrader/
 └── README.md
 
 # Gerados em tempo de execução (ignorados pelo git):
-# config.json, alerts_history.json, gorilatrader.log
+# config.json, alerts_history.json, paper_trades.json, gorilatrader.log
 ```
 
 ---
