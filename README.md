@@ -133,6 +133,8 @@ python3 gorilatrader.py --assets BTC,ETH,DOGE
 
 Um ticker que já está no `config.json`/nos padrões (ex.: `BTC`) reaproveita nome, ícone, exchange e casas decimais já curados. Um ticker novo (ex.: `DOGE`) assume automaticamente o par `TICKERUSDT` na Binance spot e detecta as casas decimais de exibição pelo preço atual (preços bem pequenos, tipo PEPE, ganham mais casas pra não arredondar tudo pra zero). Se o par não existir na Binance, o programa avisa e segue mesmo assim (aquele ativo aparece como "Erro de conexão" no dashboard). O prompt só aparece em terminal interativo - `--serve`, `--backtest`, `--paper-report`, `--reset-paper-trading`, `--test-telegram` e `--test-sound` nunca travam esperando input.
 
+Não tem limite de quantidade - a tabela do terminal cresce automaticamente com o número de ativos (1 linha a mais por ativo) e se ajusta à altura do terminal disponível, então dá pra acompanhar dezenas ou centenas de criptos de uma vez (`--assets BTC,ETH,SOL,...`), não só as 5 do padrão. Num terminal pequeno demais pra caber tudo, o histórico de alertas cede espaço primeiro; a tabela de ativos só é comprimida como último recurso.
+
 ---
 
 ## 📦 Instalação
@@ -187,6 +189,10 @@ python3 gorilatrader.py --serve
 # abre em http://127.0.0.1:8000
 ```
 Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Charts](https://github.com/tradingview/lightweight-charts), open-source da própria TradingView) com overlays configuráveis (EMA9/21/50/200, Bandas de Bollinger, Canal Donchian, Nuvem de Ichimoku - as três últimas com a área entre as bandas sombreada, via uma primitiva de desenho customizada já que o Lightweight Charts v4 não tem série nativa de "preenchimento entre duas linhas") e um painel de oscilador (RSI/MACD/OBV) sincronizado. A barra lateral mostra sinal, score, Stop Loss/Take Profits e os fatores técnicos do ativo selecionado. A atualização é via **WebSocket** (`/ws/{ativo}`) - o servidor empurra gráfico + snapshot a cada ~20s sem o navegador precisar ficar re-consultando a API, com reconexão automática se a conexão cair. Use `--port` para trocar a porta e `--host 0.0.0.0` para acessar de outro dispositivo na rede.
+
+**⭐ Favoritos na barra lateral**: digite qualquer ticker (ex.: `DOGE`) na caixa "Favoritos" e clique em "+" - o servidor resolve o símbolo (par USDT na Binance, decimais detectados pelo preço, mesmo mecanismo do `--assets` do terminal) e adiciona à lista. Clique num favorito pra trocar o gráfico pra ele. A lista fica salva no `localStorage` do navegador (por dispositivo), não precisa estar em `config.json` nem reiniciar o servidor. Um ticker que não existe na Binance mostra um aviso e não é adicionado.
+
+**📝 Modo Papel no dashboard**: o botão "📝 Modo Papel" no cabeçalho abre um painel com a mesma performance do `--paper-report` do terminal (taxa de acerto, R médio, retorno % por direção, posições abertas e últimas entradas fechadas) - lê do mesmo motor que roda em segundo plano no `--serve` (`/api/paper-trading`).
 
 Ou clique no atalho **GorilaTrader Web** no menu de aplicativos (veja abaixo) - ele sobe o servidor e já abre o navegador automaticamente:
 ```bash
@@ -294,7 +300,7 @@ GorilaTrader/
 ├── web/index.html          # Frontend do dashboard web (Lightweight Charts, sem build step)
 ├── backtest.py             # Motor de backtest (--backtest) sobre histórico real da Binance
 ├── paper_trading.py        # Motor do modo papel (--paper-report) - simula execução dos sinais ao vivo
-├── tests/                  # Suíte pytest (matriz de confluência, backtest, modo papel, config, Telegram, histórico)
+├── tests/                  # Suíte pytest (matriz de confluência, backtest, modo papel, dashboard web, layout do terminal, config, Telegram, histórico)
 ├── Dockerfile / docker-compose.yml / .dockerignore  # Empacotamento para servidor/VPS
 ├── run.sh                  # Inicia o dashboard no terminal (abre terminal se clicado fora de um)
 ├── run-web.sh              # Inicia o dashboard web e abre o navegador

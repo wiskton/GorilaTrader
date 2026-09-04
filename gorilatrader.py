@@ -1016,6 +1016,19 @@ class CryptoAnalyzer:
 # Interface Terminal Interativa com Rich
 # ---------------------------------------------------------------------------
 
+MAX_FETCH_WORKERS = 20  # teto de threads simultâneas na busca, mesmo com dezenas/centenas de ativos (--assets)
+
+# Dimensões-base do layout do dashboard, calibradas originalmente pra 5 ativos
+# fixos (BTC/ETH/SOL/PEPE/HYPE) - agora que qualquer quantidade de ativos pode
+# ser configurada (config.json ou --assets), a tabela cresce dinamicamente com
+# o número de ativos em vez de ficar travada em 15 linhas (ver build_dashboard).
+BASE_MAIN_LAYOUT_SIZE = 15
+BASE_DETAILS_LAYOUT_SIZE = 9
+BASE_ASSET_COUNT = 5
+MIN_DETAILS_LAYOUT_SIZE = 6
+MIN_MAIN_LAYOUT_SIZE = 6
+
+
 class GorilaTraderTerminal:
     """Gerenciador do loop em tempo real e visualização no terminal."""
 
@@ -1047,9 +1060,15 @@ class GorilaTraderTerminal:
             self.paper = PaperTradingEngine(PAPER_TRADES_PATH, max_holding_hours=paper_trading_max_holding_hours)
 
     def fetch_all(self) -> Dict[str, Optional[MarketData]]:
-        """Busca e analisa todos os ativos em paralelo (evita ~5x latência sequencial)."""
+        """Busca e analisa todos os ativos em paralelo (evita Nx latência sequencial).
+
+        `max_workers` é limitado (MAX_FETCH_WORKERS) mesmo com dezenas/centenas
+        de ativos configurados - sem isso, uma lista grande via --assets abriria
+        uma thread por ativo e bateria na exchange com todas as requisições de
+        uma vez só, arriscando rate limit (429). O ThreadPoolExecutor enfileira
+        o resto normalmente, só limita quantas rodam ao mesmo tempo."""
         results: Dict[str, Optional[MarketData]] = {}
-        with ThreadPoolExecutor(max_workers=len(ASSETS)) as executor:
+        with ThreadPoolExecutor(max_workers=min(len(ASSETS), MAX_FETCH_WORKERS) or 1) as executor:
             futures = {
                 executor.submit(CryptoAnalyzer.analyze_asset, key, config): key
                 for key, config in ASSETS.items()
@@ -1082,12 +1101,42 @@ class GorilaTraderTerminal:
             return f"${price:,.2f}"
         return f"${price:.{decimals}f}"
 
+    def _layout_sizes(self) -> Tuple[int, int]:
+        """Altura das regiões "main" (tabela de ativos) e "details" (histórico
+        de alertas): cresce com o número de ativos configurados (1 linha a mais
+        por ativo além dos 5 originais) e se ajusta ao terminal disponível -
+        primeiro encolhe o histórico de alertas (até um mínimo), só depois a
+        própria tabela, garantindo que o dashboard sempre usa a tela toda em
+        vez de cortar ativos fora quando há mais de 5 configurados (--assets)."""
+        header_size, footer_size = 3, 3
+        main_size = BASE_MAIN_LAYOUT_SIZE + max(0, len(ASSETS) - BASE_ASSET_COUNT)
+        details_size = BASE_DETAILS_LAYOUT_SIZE
+
+        try:
+            console_height = self.console.size.height
+        except Exception:
+            console_height = 0
+
+        if console_height:
+            available = console_height - header_size - footer_size
+            overflow = (main_size + details_size) - available
+            if overflow > 0:
+                shrink_details = min(overflow, details_size - MIN_DETAILS_LAYOUT_SIZE)
+                if shrink_details > 0:
+                    details_size -= shrink_details
+                    overflow -= shrink_details
+                if overflow > 0:
+                    main_size = max(main_size - overflow, MIN_MAIN_LAYOUT_SIZE)
+
+        return main_size, details_size
+
     def build_dashboard(self, data_map: Dict[str, MarketData], countdown: int) -> Layout:
+        main_size, details_size = self._layout_sizes()
         layout = Layout()
         layout.split(
             Layout(name="header", size=3),
-            Layout(name="main", size=15),
-            Layout(name="details", size=9),
+            Layout(name="main", size=main_size),
+            Layout(name="details", size=details_size),
             Layout(name="footer", size=3),
         )
 

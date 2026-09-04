@@ -100,13 +100,23 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] 🐛 Corrigido de quebra: `format_price`/`fmt_price`/`_format_price` (terminal, backtest, modo papel) e `fmtPrice` (dashboard web) só tratavam 2, 3 ou 8 casas decimais como casos especiais - qualquer outro valor (ex.: as 4 ou 6 casas que a detecção automática podia gerar) caía sempre em 2 casas fixas, arredondando o preço de ativos de valor baixo pra `$0.00`. Generalizado pra usar as casas decimais recebidas diretamente.
 - [x] 9 novos testes (heurística de casas decimais, reaproveitamento de ativo conhecido, montagem automática de ativo novo, fallback e aviso quando o símbolo não existe) - 106 testes no total
 
+## ✅ v2.0 — Dashboard Web Expandido e Terminal sem Limite de Ativos (entregue)
+
+- [x] **Modo Papel no dashboard web**: botão "📝 Modo Papel" no cabeçalho abre um painel com a mesma performance do `--paper-report` do terminal (resumo por direção, posições abertas, últimas entradas fechadas) - novo endpoint `/api/paper-trading`, lendo do mesmo motor que já roda em segundo plano no `--serve`
+- [x] **Favoritos na barra lateral**: caixa pra digitar qualquer ticker (ex.: `DOGE`) e adicionar à lista - resolvido sob demanda (`/api/resolve/{ticker}`, mesmo mecanismo do `--assets` do terminal) mesmo que não esteja em `config.json`; clique num favorito troca o gráfico pra ele. Lista salva no `localStorage` do navegador (por dispositivo), sobrevive a reinícios do servidor sem precisar editar nada
+- [x] `/api/chart/{key}`, `/api/snapshot/{key}` e `/ws/{key}` agora resolvem qualquer ticker sob demanda (não só os de `ASSETS`) via `resolve_asset_config`, com cache em memória pra não repetir a detecção de decimais a cada atualização do WebSocket
+- [x] 🐛 Corrigido: um ticker inventado no campo de favoritos nunca causava erro (a resolução do `--assets` do terminal sempre "desiste bonito" caindo pra decimais=2, o que faz sentido lá) - no navegador isso criaria um favorito "fantasma" que nunca carrega dado; `resolve_asset_config` agora valida de verdade e devolve 404 pra ticker que não existe
+- [x] **Terminal sem limite de 5 ativos**: o layout do dashboard (Rich `Layout`) tinha altura fixa (calibrada originalmente pra exatamente 5 linhas) - com `--assets`/`config.json` aceitando qualquer quantidade, ativos além do 5º simplesmente eram cortados da tela sem aviso. A tabela agora cresce 1 linha por ativo extra e se ajusta à altura real do terminal (encolhe primeiro o histórico de alertas, só depois a própria tabela) - dá pra acompanhar dezenas ou centenas de criptos de uma vez, limitado só pelo tamanho real da janela do terminal
+- [x] Teto de 20 threads simultâneas na busca (`MAX_FETCH_WORKERS`) mesmo com uma lista grande de ativos - evita bater a exchange com uma rajada de requisições de uma vez e levar rate limit (429)
+- [x] 19 novos testes (dimensionamento do layout do terminal em vários cenários de altura/quantidade de ativos, resolução de ativos no backend do dashboard web incluindo cache e fallback 404, endpoint de performance do modo papel) - 125 testes no total
+
 ---
 
 ## 🚧 Próximos Passos
 
 ### Longo prazo / explorações
 - [ ] Autenticação simples no dashboard web para uso seguro com `--host 0.0.0.0` fora da rede local
-- [ ] Exibir a performance do modo papel também no dashboard web (hoje só via `--paper-report` no terminal)
+- [ ] Favoritos do dashboard web também entrarem no monitor de alertas/modo papel em segundo plano (hoje são só pra visualização, não geram apito/Telegram/posição simulada)
 
 ---
 

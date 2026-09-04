@@ -13,6 +13,7 @@ import asyncio
 import math
 import os
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from typing import List, Optional
 
 import numpy as np
@@ -21,11 +22,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from gorilatrader import (
     ASSETS,
+    DEFAULT_ASSETS,
     PAPER_TRADING_CFG,
     TELEGRAM_CFG,
     CryptoAnalyzer,
     GorilaTraderTerminal,
     MarketData,
+    _detect_display_decimals,
     logger,
     resolve_telegram_credentials,
 )
@@ -53,6 +56,45 @@ alert_monitor = GorilaTraderTerminal(
     paper_trading_max_holding_hours=PAPER_TRADING_CFG.get("max_holding_hours", 200),
 )
 _alert_data_map: dict = {}
+
+# Ativos "favoritos" digitados no navegador (sidebar) que não estão em ASSETS
+# (config.json) - resolvidos sob demanda (ver resolve_asset_config) e mantidos
+# em cache aqui pra não repetir a detecção de casas decimais (que bate na
+# exchange) a cada requisição de gráfico/snapshot/WebSocket. Não entram no
+# monitor de alertas/modo papel em segundo plano - são só pra visualização.
+_extra_assets_cache: dict = {}
+
+
+def resolve_asset_config(key: str) -> Optional[dict]:
+    """Igual ao resolve_assets_from_tickers usado pelo --assets do terminal,
+    mas mais rígido: lá um símbolo que não existe cai pra decimais=2 e segue
+    em frente (baixo custo, é só uma linha "Erro de conexão" no dashboard);
+    aqui devolve None pra virar 404 - sem essa validação, um ticker inventado
+    viraria um favorito "fantasma" salvo no navegador que nunca carrega dado."""
+    key = key.upper()
+    if key in ASSETS:
+        return ASSETS[key]
+    if key in _extra_assets_cache:
+        return _extra_assets_cache[key]
+    if key in DEFAULT_ASSETS:
+        cfg = DEFAULT_ASSETS[key]
+        _extra_assets_cache[key] = cfg
+        return cfg
+
+    symbol = f"{key}USDT"
+    df = CryptoAnalyzer.fetch_klines(symbol, "binance_spot", interval="1h", limit=2)
+    if df is None or df.empty:
+        return None
+
+    cfg = {
+        "name": key,
+        "symbol": symbol,
+        "exchange": "binance_spot",
+        "icon": "🪙",
+        "decimals": _detect_display_decimals(float(df["close"].iloc[-1])),
+    }
+    _extra_assets_cache[key] = cfg
+    return cfg
 
 
 async def _alert_monitor_loop():
@@ -188,13 +230,42 @@ def api_assets():
     }
 
 
+@app.get("/api/paper-trading")
+def api_paper_trading():
+    """Performance do modo papel (mesmo motor que roda em segundo plano no
+    monitor de alertas - ver alert_monitor.paper) para exibição no dashboard
+    web, equivalente ao --paper-report do terminal."""
+    engine = alert_monitor.paper
+    if engine is None:
+        return {"enabled": False, "summary": {}, "open": [], "closed": [], "decimals": {}}
+    return {
+        "enabled": True,
+        "summary": engine.summary(),
+        "open": [asdict(t) for t in engine.open_trades.values()],
+        "closed": [asdict(t) for t in engine.closed_trades[-30:]],
+        "decimals": {key: cfg["decimals"] for key, cfg in ASSETS.items()},
+    }
+
+
+@app.get("/api/resolve/{ticker}")
+def api_resolve(ticker: str):
+    """Resolve um ticker digitado no navegador (favoritos) que pode não estar
+    em ASSETS - ver resolve_asset_config."""
+    key = ticker.upper()
+    cfg = resolve_asset_config(key)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"Não foi possível resolver {key}")
+    return {"key": key, "name": cfg["name"], "icon": cfg["icon"], "decimals": cfg["decimals"]}
+
+
 @app.get("/api/chart/{key}")
 def api_chart(key: str):
     key = key.upper()
-    if key not in ASSETS:
+    cfg = resolve_asset_config(key)
+    if cfg is None:
         raise HTTPException(status_code=404, detail="Ativo desconhecido")
     try:
-        return JSONResponse(build_chart_payload(key, ASSETS[key]))
+        return JSONResponse(build_chart_payload(key, cfg))
     except HTTPException:
         raise
     except Exception:
@@ -227,9 +298,10 @@ def snapshot_payload(item: MarketData) -> dict:
 @app.get("/api/snapshot/{key}")
 def api_snapshot(key: str):
     key = key.upper()
-    if key not in ASSETS:
+    cfg = resolve_asset_config(key)
+    if cfg is None:
         raise HTTPException(status_code=404, detail="Ativo desconhecido")
-    item = CryptoAnalyzer.analyze_asset(key, ASSETS[key])
+    item = CryptoAnalyzer.analyze_asset(key, cfg)
     if item is None:
         raise HTTPException(status_code=502, detail="Falha ao obter dados (veja gorilatrader.log)")
     return snapshot_payload(item)
@@ -242,11 +314,11 @@ async def ws_updates(websocket: WebSocket, key: str):
     síncronas e bloqueantes, então rodam em thread separada (asyncio.to_thread)
     para não travar outras conexões no mesmo processo."""
     key = key.upper()
-    if key not in ASSETS:
+    config = await asyncio.to_thread(resolve_asset_config, key)
+    if config is None:
         await websocket.close(code=1008)
         return
 
-    config = ASSETS[key]
     await websocket.accept()
 
     try:

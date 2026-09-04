@@ -48,6 +48,40 @@
   .reasons li{margin-bottom:4px;}
   footer{padding:8px 16px;color:var(--muted);font-size:11px;text-align:center;}
   a{color:var(--cyan);}
+
+  .header-btn{padding:6px 12px;border-radius:6px;background:var(--panel2);border:1px solid var(--border);color:var(--text);cursor:pointer;font-size:13px;font-weight:600;}
+  .header-btn:hover{border-color:var(--cyan);}
+
+  .fav-add{display:flex;gap:6px;margin-bottom:10px;}
+  .fav-add input{flex:1;min-width:0;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;}
+  .fav-add button{background:var(--green);color:#04140c;border:none;border-radius:6px;padding:6px 12px;font-weight:700;cursor:pointer;font-size:14px;}
+  .fav-list{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;}
+  .fav-empty{color:var(--muted);font-size:12px;padding:6px 0;}
+  .fav-row{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;background:var(--panel2);}
+  .fav-row:hover{outline:1px solid var(--border);}
+  .fav-row.active{background:var(--green);color:#04140c;font-weight:700;}
+  .fav-row .fav-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .fav-remove{color:var(--muted);padding:0 4px;font-weight:700;}
+  .fav-row.active .fav-remove{color:#04140c;}
+  .fav-remove:hover{color:var(--red);}
+  .fav-error{color:var(--red);font-size:11px;margin:-4px 0 8px;}
+
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .modal-backdrop.open{display:flex;}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:10px;max-width:920px;width:100%;max-height:88vh;overflow:auto;}
+  .modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);}
+  .modal-header h2{margin:0;font-size:15px;}
+  .modal-close{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;}
+  .modal-close:hover{color:var(--text);}
+  .modal-body{padding:16px 18px;font-size:13px;}
+  .paper-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:18px;}
+  .paper-stat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+  .paper-stat h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;}
+  .paper-subtitle{margin:18px 0 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;}
+  .paper-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px;}
+  .paper-table th,.paper-table td{padding:6px 8px;border-bottom:1px dashed var(--border);text-align:left;white-space:nowrap;}
+  .paper-table th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;}
+  .paper-table-wrap{overflow-x:auto;}
 </style>
 </head>
 <body>
@@ -56,8 +90,19 @@
   <h1><span class="gorilla">🦍</span>GorilaTrader Web</h1>
   <div class="tabs" id="tabs"></div>
   <div class="spacer"></div>
+  <button id="paperBtn" class="header-btn">📝 Modo Papel</button>
   <div class="status" id="status">carregando…</div>
 </header>
+
+<div class="modal-backdrop" id="paperModalBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>📝 Modo Papel — Performance</h2>
+      <button class="modal-close" id="paperCloseBtn">&times;</button>
+    </div>
+    <div class="modal-body" id="paperBody">carregando…</div>
+  </div>
+</div>
 
 <main>
   <div class="chartcol">
@@ -76,6 +121,15 @@
   </div>
 
   <aside>
+    <div class="card">
+      <h2>⭐ Favoritos</h2>
+      <div class="fav-add">
+        <input type="text" id="favInput" placeholder="Ex.: DOGE" maxlength="20" />
+        <button id="favAddBtn">+</button>
+      </div>
+      <div class="fav-error" id="favError" hidden></div>
+      <div class="fav-list" id="favList"></div>
+    </div>
     <div class="card">
       <h2 id="assetName">—</h2>
       <div><span class="price" id="price">—</span><span class="chg" id="chg1h"></span></div>
@@ -334,6 +388,7 @@ function buildTabs() {
 function switchAsset(key) {
   currentKey = key;
   buildTabs();
+  buildFavorites();
   lastChartData = null;
   connectWebSocket(key);
 }
@@ -487,6 +542,204 @@ function connectWebSocket(key) {
   };
 }
 
+// --- Favoritos: lista de tickers salva no navegador (localStorage), pra
+// clicar e trocar de ativo sem precisar que o ticker esteja pré-configurado
+// no config.json - resolvido sob demanda via /api/resolve/{ticker}. ---
+const FAVORITES_KEY = 'gorilatrader_favorites';
+let favorites = [];
+let favBusy = false;
+
+function loadFavorites() {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    favorites = raw ? JSON.parse(raw) : [];
+  } catch (e) { favorites = []; }
+}
+function saveFavorites() {
+  try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites)); } catch (e) {}
+}
+function showFavError(msg) {
+  const el = document.getElementById('favError');
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+async function ensureAssetResolved(key) {
+  if (assets[key]) return assets[key];
+  const res = await fetch(`/api/resolve/${encodeURIComponent(key)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Não foi possível resolver ${key}`);
+  }
+  const cfg = await res.json();
+  assets[key] = { name: cfg.name, icon: cfg.icon, decimals: cfg.decimals };
+  return assets[key];
+}
+
+function buildFavorites() {
+  const el = document.getElementById('favList');
+  el.innerHTML = '';
+  if (!favorites.length) {
+    el.innerHTML = '<div class="fav-empty">Nenhum favorito ainda - digite um ticker acima.</div>';
+    return;
+  }
+  for (const key of favorites) {
+    const row = document.createElement('div');
+    row.className = 'fav-row' + (key === currentKey ? ' active' : '');
+    const label = document.createElement('span');
+    label.className = 'fav-label';
+    const icon = assets[key] ? assets[key].icon : '🪙';
+    label.textContent = `${icon} ${key}`;
+    label.title = `Analisar ${key}`;
+    label.addEventListener('click', () => selectFavorite(key));
+    const rm = document.createElement('span');
+    rm.className = 'fav-remove';
+    rm.textContent = '×';
+    rm.title = 'Remover dos favoritos';
+    rm.addEventListener('click', (e) => { e.stopPropagation(); removeFavorite(key); });
+    row.appendChild(label);
+    row.appendChild(rm);
+    el.appendChild(row);
+  }
+}
+
+async function selectFavorite(key) {
+  showFavError('');
+  try {
+    await ensureAssetResolved(key);
+    switchAsset(key);
+  } catch (e) {
+    showFavError(e.message);
+  }
+}
+
+async function addFavorite(rawTicker) {
+  const key = rawTicker.trim().toUpperCase();
+  if (!key || favBusy) return;
+  showFavError('');
+  favBusy = true;
+  try {
+    await ensureAssetResolved(key);
+    if (!favorites.includes(key)) {
+      favorites.push(key);
+      saveFavorites();
+    }
+    buildFavorites();
+    switchAsset(key);
+  } catch (e) {
+    showFavError(e.message);
+  } finally {
+    favBusy = false;
+  }
+}
+
+function removeFavorite(key) {
+  favorites = favorites.filter(k => k !== key);
+  saveFavorites();
+  buildFavorites();
+}
+
+function setupFavoritesUI() {
+  loadFavorites();
+  buildFavorites();
+  document.getElementById('favAddBtn').addEventListener('click', () => {
+    const input = document.getElementById('favInput');
+    addFavorite(input.value);
+    input.value = '';
+  });
+  document.getElementById('favInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      addFavorite(e.target.value);
+      e.target.value = '';
+    }
+  });
+}
+
+// --- Modo Papel: performance do modo papel (--paper-report equivalente) ---
+const PAPER_WIN_OUTCOMES = new Set(['TP1', 'TP1_TIMEOUT', 'TP2']);
+const PAPER_LOSS_OUTCOMES = new Set(['STOP', 'STOP_AFTER_TP1']);
+
+function paperDecimals(data, key) {
+  return (data.decimals && data.decimals[key] != null) ? data.decimals[key] : 2;
+}
+
+function renderPaperSummary(summary) {
+  let html = '<div class="paper-summary">';
+  for (const name of ['TODOS', 'COMPRA', 'VENDA']) {
+    const s = summary[name] || { trades: 0 };
+    html += `<div class="paper-stat"><h3>${name}</h3>`;
+    if (!s.trades) {
+      html += '<div style="color:var(--muted)">nenhuma entrada fechada ainda</div>';
+    } else {
+      const rColor = s.total_r >= 0 ? 'var(--green)' : 'var(--red)';
+      html += `<div style="font-size:16px;font-weight:700">${s.trades} trades · ${s.win_rate.toFixed(1)}% acerto</div>`;
+      html += `<div style="color:var(--muted);margin-top:4px">R médio ${s.avg_r >= 0 ? '+' : ''}${s.avg_r.toFixed(2)} · `
+        + `soma R <span style="color:${rColor}">${s.total_r >= 0 ? '+' : ''}${s.total_r.toFixed(2)}</span> · `
+        + `retorno médio ${s.avg_pct >= 0 ? '+' : ''}${s.avg_pct.toFixed(2)}%</div>`;
+    }
+    html += '</div>';
+  }
+  return html + '</div>';
+}
+
+function renderPaperOpenTable(data) {
+  if (!data.open.length) return '<p style="color:var(--muted)">Nenhuma posição aberta no momento.</p>';
+  let html = '<div class="paper-table-wrap"><table class="paper-table"><thead><tr>'
+    + '<th>Ativo</th><th>Direção</th><th>Entrada</th><th>Preço</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP1?</th>'
+    + '</tr></thead><tbody>';
+  for (const t of data.open) {
+    const dec = paperDecimals(data, t.asset_key);
+    const dirColor = t.direction === 'COMPRA' ? 'var(--green)' : 'var(--red)';
+    html += `<tr><td>${t.asset_key}</td><td style="color:${dirColor}">${t.direction}</td><td>${t.entry_time}</td>`
+      + `<td>${fmtPrice(t.entry_price, dec)}</td><td>${fmtPrice(t.sl, dec)}</td>`
+      + `<td>${fmtPrice(t.tp1, dec)}</td><td>${fmtPrice(t.tp2, dec)}</td><td>${t.reached_tp1 ? '✅' : '—'}</td></tr>`;
+  }
+  return html + '</tbody></table></div>';
+}
+
+function renderPaperClosedTable(data) {
+  if (!data.closed.length) return '<p style="color:var(--muted)">Nenhuma entrada fechada ainda.</p>';
+  let html = '<div class="paper-table-wrap"><table class="paper-table"><thead><tr>'
+    + '<th>Ativo</th><th>Sinal</th><th>Entrada</th><th>Saída</th><th>Resultado</th><th>R</th><th>Retorno</th>'
+    + '</tr></thead><tbody>';
+  for (const t of [...data.closed].reverse()) {
+    const color = PAPER_WIN_OUTCOMES.has(t.outcome) ? 'var(--green)' : (PAPER_LOSS_OUTCOMES.has(t.outcome) ? 'var(--red)' : 'var(--amber)');
+    html += `<tr><td>${t.asset_key}</td><td>${t.signal}</td><td>${t.entry_time}</td><td>${t.exit_time || '—'}</td>`
+      + `<td style="color:${color}">${t.outcome}</td>`
+      + `<td style="color:${color}">${t.r_multiple >= 0 ? '+' : ''}${t.r_multiple.toFixed(2)}</td>`
+      + `<td style="color:${color}">${t.pct_return >= 0 ? '+' : ''}${t.pct_return.toFixed(2)}%</td></tr>`;
+  }
+  return html + '</tbody></table></div>';
+}
+
+async function loadPaperTrading() {
+  const body = document.getElementById('paperBody');
+  body.innerHTML = 'carregando…';
+  try {
+    const res = await fetch('/api/paper-trading');
+    const data = await res.json();
+    if (!data.enabled) {
+      body.innerHTML = '<p>Modo papel desativado nesta instância (veja <code>--no-paper-trading</code> / <code>config.json</code>).</p>';
+      return;
+    }
+    body.innerHTML = renderPaperSummary(data.summary)
+      + '<h3 class="paper-subtitle">Posições abertas</h3>' + renderPaperOpenTable(data)
+      + '<h3 class="paper-subtitle">Últimas entradas fechadas</h3>' + renderPaperClosedTable(data);
+  } catch (e) {
+    body.innerHTML = `<p style="color:var(--red)">Falha ao carregar: ${e.message}</p>`;
+  }
+}
+
+function setupPaperModal() {
+  const backdrop = document.getElementById('paperModalBackdrop');
+  document.getElementById('paperBtn').addEventListener('click', () => {
+    backdrop.classList.add('open');
+    loadPaperTrading();
+  });
+  document.getElementById('paperCloseBtn').addEventListener('click', () => backdrop.classList.remove('open'));
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.classList.remove('open'); });
+}
+
 async function init() {
   const res = await fetch('/api/assets');
   assets = await res.json();
@@ -495,6 +748,8 @@ async function init() {
   buildTabs();
   buildOverlayToolbar();
   buildCharts();
+  setupFavoritesUI();
+  setupPaperModal();
 
   document.getElementById('oscSelect').addEventListener('change', (e) => {
     oscMode = e.target.value;
