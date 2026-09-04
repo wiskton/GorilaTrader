@@ -8,6 +8,7 @@ Ativos monitorados: Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Pepe (PEPE) e H
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
 import math
@@ -1018,6 +1019,11 @@ class CryptoAnalyzer:
 
 MAX_FETCH_WORKERS = 20  # teto de threads simultâneas na busca, mesmo com dezenas/centenas de ativos (--assets)
 
+# Sinais de "mais certeza" - único critério usado tanto pro filtro de entrada
+# quanto pro aviso de conclusão (STOP/TP) no Telegram, mantendo os dois
+# consistentes: só um trade aberto por um sinal FORTE gera aviso de saída.
+HIGH_CONFIDENCE_SIGNALS = ("FORTE COMPRA", "FORTE VENDA")
+
 # Dimensões-base do layout do dashboard, calibradas originalmente pra 5 ativos
 # fixos (BTC/ETH/SOL/PEPE/HYPE) - agora que qualquer quantidade de ativos pode
 # ser configurada (config.json ou --assets), a tabela cresce dinamicamente com
@@ -1091,7 +1097,9 @@ class GorilaTraderTerminal:
                 self.check_and_alert(res)
                 self.check_extreme_alerts(res)
                 if self.paper is not None:
-                    self.paper.update(res)
+                    closed_trade = self.paper.update(res)
+                    if closed_trade is not None and closed_trade.signal in HIGH_CONFIDENCE_SIGNALS:
+                        self._record_trade_conclusion(closed_trade)
             else:
                 self.stale[key] = True
         return data_map
@@ -1310,8 +1318,11 @@ class GorilaTraderTerminal:
 
         return layout
 
-    def _record_alert(self, item: MarketData, label: str, bullish: bool, detail: str):
-        """Ponto único de disparo de qualquer aviso: apito, histórico (persistido) e Telegram."""
+    def _record_alert(self, item: MarketData, label: str, bullish: bool, detail: str, send_telegram: bool = True):
+        """Ponto único de disparo de qualquer aviso: apito, histórico (persistido)
+        e Telegram. `send_telegram=False` mantém apito e histórico normalmente,
+        só pula o envio ao Telegram - usado por check_and_alert para deixar o
+        Telegram seletivo (só sinais FORTE), sem afetar o resto do dashboard."""
         key = item.asset_key
         p_str = self.format_price(item.price, ASSETS[key]["decimals"])
 
@@ -1330,12 +1341,62 @@ class GorilaTraderTerminal:
         self.history_alerts = self.history_alerts[-MAX_HISTORY_ENTRIES:]
         save_alert_history(self.history_alerts)
 
+        if not send_telegram:
+            return
+
         emoji = "🟢" if bullish else "🔴"
+        # Telegram usa parse_mode HTML: qualquer "<"/">" vindo de texto dinâmico
+        # (ex.: fatores técnicos como "Preço < EMA9 < EMA21") é interpretado como
+        # tag e derruba a mensagem inteira ("can't parse entities") - escapa tudo
+        # que não é a tag literal do próprio template (<b>...</b>).
         text = (
-            f"{emoji} <b>GorilaTrader</b> · {ASSETS[key]['icon']} <b>{key}</b>\n"
-            f"{label}\n"
-            f"Preço: {p_str}\n"
-            f"{detail}\n"
+            f"{emoji} <b>GorilaTrader</b> · {ASSETS[key]['icon']} <b>{html.escape(key)}</b>\n"
+            f"{html.escape(label)}\n"
+            f"Preço: {html.escape(p_str)}\n"
+            f"{html.escape(detail)}\n"
+            f"🕒 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        )
+        self.telegram.send(text)
+
+    def _record_trade_conclusion(self, trade) -> None:
+        """Avisa quando uma posição simulada do modo papel conclui (STOP/TP) -
+        só chamado para trades abertos a partir de sinal FORTE (mesmo filtro de
+        "mais certeza" da entrada), consistente com check_and_alert. Vai pro
+        mesmo histórico de alertas do dashboard e, se configurado, pro Telegram."""
+        key = trade.asset_key
+        cfg = ASSETS.get(key, {})
+        decimals = cfg.get("decimals", 2)
+        icon = cfg.get("icon", "")
+        exit_str = self.format_price(trade.exit_price, decimals)
+
+        win = trade.outcome in ("TP1", "TP1_TIMEOUT", "TP2")
+        if trade.outcome in ("STOP", "STOP_AFTER_TP1"):
+            label = "🛑 STOP"
+        elif trade.outcome == "TP2":
+            label = "✅ TAKE PROFIT (TP2)"
+        elif trade.outcome == "TP1_TIMEOUT":
+            label = "✅ TAKE PROFIT PARCIAL (TP1 atingido antes do prazo)"
+        else:  # TIMEOUT
+            label = "⏱ ENCERRADO POR TEMPO (sem tocar SL/TP)"
+
+        detail = f"Resultado: {trade.r_multiple:+.2f}R ({trade.pct_return:+.2f}%) · Entrada: {trade.signal}"
+
+        self.history_alerts.append({
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "asset": f"{icon} {key}",
+            "signal": label,
+            "price": exit_str,
+            "reason": detail,
+        })
+        self.history_alerts = self.history_alerts[-MAX_HISTORY_ENTRIES:]
+        save_alert_history(self.history_alerts)
+
+        emoji = "🟢" if win else "🔴"
+        text = (
+            f"{emoji} <b>GorilaTrader</b> · {icon} <b>{html.escape(key)}</b>\n"
+            f"{html.escape(label)}\n"
+            f"Saída: {html.escape(exit_str)}\n"
+            f"{html.escape(detail)}\n"
             f"🕒 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
         )
         self.telegram.send(text)
@@ -1351,10 +1412,12 @@ class GorilaTraderTerminal:
 
         if is_fresh_buy:
             reason_summary = " · ".join(item.reasons[:2]) if item.reasons else "Confluência altista confirmada"
-            self._record_alert(item, current_sig, bullish=True, detail=reason_summary)
+            self._record_alert(item, current_sig, bullish=True, detail=reason_summary,
+                                send_telegram=current_sig in HIGH_CONFIDENCE_SIGNALS)
         elif is_fresh_sell:
             reason_summary = " · ".join(item.reasons[:2]) if item.reasons else "Confluência baixista confirmada"
-            self._record_alert(item, current_sig, bullish=False, detail=reason_summary)
+            self._record_alert(item, current_sig, bullish=False, detail=reason_summary,
+                                send_telegram=current_sig in HIGH_CONFIDENCE_SIGNALS)
 
         if self.paper is not None:
             self.paper.maybe_open(item, is_fresh_buy, is_fresh_sell)

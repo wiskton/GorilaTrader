@@ -5,8 +5,10 @@ a chamada à API falhava (ex.: bot não é membro do canal)."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import gorilatrader as g
 from gorilatrader import TelegramNotifier
 
 
@@ -51,3 +53,32 @@ def test_send_sync_reports_failure_on_network_exception():
         ok, detail = notifier.send_sync("teste")
     assert ok is False
     assert "sem rede" in detail
+
+
+def test_record_alert_escapes_html_special_characters():
+    """Regressão real: alguns fatores técnicos usam "<" cru (ex.: "Preço <
+    EMA9 < EMA21 < EMA50"). Como o Telegram usa parse_mode HTML, esse "<" era
+    interpretado como início de tag e o envio inteiro falhava silenciosamente
+    (loga um WARNING, mas ninguém vê) - por isso os sinais apareciam no
+    dashboard e nunca chegavam no Telegram."""
+    terminal = g.GorilaTraderTerminal(
+        sound_enabled=False,
+        telegram_token="TOKEN",
+        telegram_chat_id="@canal",
+        paper_trading_enabled=False,
+    )
+    terminal.telegram.send = MagicMock()
+    item = SimpleNamespace(asset_key="BTC", name="Bitcoin", price=79600.90)
+
+    with patch("gorilatrader.save_alert_history"):
+        terminal._record_alert(
+            item,
+            "VENDA",
+            bullish=False,
+            detail="Alinhamento clássico de baixa (Preço < EMA9 < EMA21 < EMA50)",
+        )
+
+    sent_text = terminal.telegram.send.call_args[0][0]
+    assert "< EMA9" not in sent_text  # nenhum "<" cru sobrando no texto dinâmico
+    assert "&lt; EMA9" in sent_text   # escapado corretamente
+    assert "<b>" in sent_text         # tags do próprio template (fixas) continuam intactas

@@ -110,11 +110,18 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Teto de 20 threads simultâneas na busca (`MAX_FETCH_WORKERS`) mesmo com uma lista grande de ativos - evita bater a exchange com uma rajada de requisições de uma vez e levar rate limit (429)
 - [x] 19 novos testes (dimensionamento do layout do terminal em vários cenários de altura/quantidade de ativos, resolução de ativos no backend do dashboard web incluindo cache e fallback 404, endpoint de performance do modo papel) - 125 testes no total
 
+## ✅ v2.1 — Telegram Seletivo e Aviso de Conclusão de Operação (entregue)
+
+- [x] 🐛 **Bug real corrigido**: o Telegram usa `parse_mode: "HTML"`, e alguns fatores técnicos têm "<" cru no texto (ex.: "Alinhamento clássico de baixa (Preço < EMA9 < EMA21 < EMA50)") - o Telegram interpretava isso como início de tag e rejeitava a mensagem inteira ("can't parse entities"), então sinais reais nunca chegavam ao Telegram (só falhavam silenciosamente, com um WARNING no log) mesmo com as credenciais certas e o `--test-telegram` funcionando normalmente (mensagem de teste não tem "<"). Todo texto dinâmico da mensagem agora é escapado (`html.escape`) antes de entrar no template - as tags fixas do próprio template (`<b>...</b>`) continuam intactas
+- [x] **Telegram seletivo pra sinais de entrada**: só dispara para COMPRA/VENDA quando o sinal é **FORTE** (mais confiança) - sinal fraco continua tocando o apito e entrando no histórico do dashboard normalmente, só não vai pro Telegram. Alertas de rompimento (RSI estourado, Bollinger forte) continuam disparando sempre, independente disso - não são sinais de entrada
+- [x] **Aviso de conclusão da operação**: quando uma posição do Modo Papel aberta por um sinal FORTE encerra em Stop Loss ou Take Profit, dispara um aviso (`🛑 STOP` / `✅ TAKE PROFIT`, com R e retorno %) no histórico do dashboard e no Telegram - mesmo filtro de "mais confiança" da entrada (`HIGH_CONFIDENCE_SIGNALS`), consistente nos dois pontos
+- [x] 9 novos testes (filtro de confiança pro Telegram em compra/venda fraca/forte, alertas de rompimento continuam incondicionais, aviso de conclusão em STOP/TP2, integração via `refresh()` só pra trades de sinal forte) - 134 testes no total
+
 ---
 
 ## 🚧 Próximos Passos
 
-### Longo prazo / explorações
+### Em andamento
 - [ ] Autenticação simples no dashboard web para uso seguro com `--host 0.0.0.0` fora da rede local
 - [ ] Favoritos do dashboard web também entrarem no monitor de alertas/modo papel em segundo plano (hoje são só pra visualização, não geram apito/Telegram/posição simulada)
 
