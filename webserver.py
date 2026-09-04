@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import math
 import os
 import secrets
@@ -26,6 +27,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from gorilatrader import (
     ASSETS,
+    DATA_DIR,
     DEFAULT_ASSETS,
     PAPER_TRADING_CFG,
     TELEGRAM_CFG,
@@ -143,11 +145,11 @@ alert_monitor = GorilaTraderTerminal(
 )
 _alert_data_map: dict = {}
 
-# Ativos "favoritos" digitados no navegador (sidebar) que não estão em ASSETS
-# (config.json) - resolvidos sob demanda (ver resolve_asset_config) e mantidos
-# em cache aqui pra não repetir a detecção de casas decimais (que bate na
-# exchange) a cada requisição de gráfico/snapshot/WebSocket. Não entram no
-# monitor de alertas/modo papel em segundo plano - são só pra visualização.
+# Cache de tickers resolvidos sob demanda (ex.: só abriu o gráfico de um
+# ativo uma vez via /api/chart, sem favoritar) - evita repetir a detecção de
+# casas decimais (que bate na exchange) a cada requisição. Isso sozinho NÃO
+# entra no monitor de alertas/modo papel em segundo plano, é só visualização
+# pontual; ver _favorite_tickers logo abaixo pra quem entra de verdade.
 _extra_assets_cache: dict = {}
 
 
@@ -181,6 +183,53 @@ def resolve_asset_config(key: str) -> Optional[dict]:
     }
     _extra_assets_cache[key] = cfg
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# Favoritos - lista única do servidor (não mais por navegador): favoritar um
+# ticker o adiciona de verdade em ASSETS, então o monitor de alertas em
+# segundo plano (alert_monitor, acima) passa a tocar apito/mandar Telegram/
+# abrir posição no modo papel pra ele, exatamente como um ativo do
+# config.json. Persistido em disco pra sobreviver a reinícios do --serve.
+#
+# _original_asset_keys marca o que veio de config.json (nunca removido do
+# monitor por aqui, mesmo que alguém "desfavorite"); só tickers adicionados
+# como favorito são de fato removidos de ASSETS ao desfavoritar.
+# ---------------------------------------------------------------------------
+
+FAVORITES_PATH = os.path.join(DATA_DIR, "web_favorites.json")
+
+_original_asset_keys = frozenset(ASSETS.keys())
+_favorite_tickers: set = set()
+
+
+def _load_web_favorites() -> None:
+    if not os.path.exists(FAVORITES_PATH):
+        return
+    try:
+        with open(FAVORITES_PATH, "r", encoding="utf-8") as f:
+            tickers = json.load(f)
+    except Exception:
+        logger.warning("Falha ao carregar %s, começando sem favoritos salvos", FAVORITES_PATH, exc_info=True)
+        return
+    for ticker in tickers:
+        cfg = resolve_asset_config(ticker)
+        if cfg is not None:
+            ASSETS[ticker] = cfg
+            _favorite_tickers.add(ticker)
+
+
+def _save_web_favorites() -> None:
+    try:
+        tmp_path = f"{FAVORITES_PATH}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(sorted(_favorite_tickers), f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, FAVORITES_PATH)
+    except Exception:
+        logger.warning("Falha ao salvar %s", FAVORITES_PATH, exc_info=True)
+
+
+_load_web_favorites()
 
 
 async def _alert_monitor_loop():
@@ -365,14 +414,56 @@ def api_paper_trading(request: Request):
 
 @app.get("/api/resolve/{ticker}")
 def api_resolve(ticker: str, request: Request):
-    """Resolve um ticker digitado no navegador (favoritos) que pode não estar
-    em ASSETS - ver resolve_asset_config."""
+    """Resolve um ticker digitado no navegador que pode não estar em ASSETS,
+    sem favoritar (visualização pontual) - ver resolve_asset_config."""
     require_auth(request)
     key = ticker.upper()
     cfg = resolve_asset_config(key)
     if cfg is None:
         raise HTTPException(status_code=404, detail=f"Não foi possível resolver {key}")
     return {"key": key, "name": cfg["name"], "icon": cfg["icon"], "decimals": cfg["decimals"]}
+
+
+@app.get("/api/favorites")
+def api_list_favorites(request: Request):
+    require_auth(request)
+    return {
+        key: {"name": ASSETS[key]["name"], "icon": ASSETS[key]["icon"], "decimals": ASSETS[key]["decimals"]}
+        for key in sorted(_favorite_tickers)
+    }
+
+
+@app.post("/api/favorites/{ticker}")
+def api_add_favorite(ticker: str, request: Request):
+    """Favorita um ticker: resolve (mesma validação de resolve_asset_config -
+    símbolo inexistente vira 404) e o registra em ASSETS de verdade, então o
+    monitor de alertas em segundo plano passa a tocar apito/mandar Telegram/
+    abrir posição no modo papel pra ele a partir do próximo ciclo."""
+    require_auth(request)
+    key = ticker.upper()
+    cfg = resolve_asset_config(key)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"Não foi possível resolver {key}")
+    ASSETS[key] = cfg
+    _favorite_tickers.add(key)
+    _save_web_favorites()
+    return {"key": key, "name": cfg["name"], "icon": cfg["icon"], "decimals": cfg["decimals"]}
+
+
+@app.delete("/api/favorites/{ticker}")
+def api_remove_favorite(ticker: str, request: Request):
+    """Desfavorita: para de monitorar (remove de ASSETS), a menos que o
+    ticker já fosse um ativo de config.json antes de qualquer favorito (esse
+    nunca sai do monitor por aqui). Uma posição do modo papel eventualmente
+    aberta pra esse ativo fica parada (sem novas atualizações) até ele ser
+    favoritado de novo - limitação conhecida, não fecha automaticamente."""
+    require_auth(request)
+    key = ticker.upper()
+    _favorite_tickers.discard(key)
+    if key not in _original_asset_keys:
+        ASSETS.pop(key, None)
+    _save_web_favorites()
+    return {"ok": True}
 
 
 @app.get("/api/chart/{key}")

@@ -10,3 +10,4 @@ venv/
 config.json
 alerts_history.json
 paper_trades.json
+web_favorites.json

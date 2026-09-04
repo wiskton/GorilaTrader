@@ -126,12 +126,19 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Nova dependência opcional `python-multipart` (só pro dashboard web, exigida pelo FastAPI pra ler o formulário de login)
 - [x] 20 novos testes (assinatura/validação do cookie incluindo adulteração e expiração, `require_auth` em cada rota, fluxo completo de login/logout, WebSocket fecha sem sessão válida) - 154 testes no total
 
+## ✅ v2.3 — Favoritos Entram no Monitor de Alertas (entregue)
+
+- [x] Favoritos deixaram de ser "só visualização por navegador" (`localStorage`) e viraram uma **lista única e compartilhada do servidor**, persistida em `web_favorites.json` - favoritar um ticker o registra de verdade em `ASSETS`, então o monitor de alertas em segundo plano (o mesmo que já rodava pros ativos de `config.json`) passa a tocar apito, mandar Telegram (se o sinal for FORTE) e abrir posição no modo papel pra ele a partir do próximo ciclo
+- [x] Novos endpoints `GET /api/favorites` (lista), `POST /api/favorites/{ticker}` (favorita - mesma validação contra ticker inventado do `/api/resolve`) e `DELETE /api/favorites/{ticker}` (desfavorita - para de monitorar)
+- [x] Ativos que já vêm de `config.json` nunca saem do monitor por essa rota, mesmo que alguém "desfavorite" - só tickers adicionados como favorito são removidos de `ASSETS` de verdade
+- [x] ⚠️ Limitação conhecida e documentada: desfavoritar um ativo com uma posição do modo papel aberta deixa essa posição parada (sem novas atualizações) até ele ser favoritado de novo - não fecha sozinha
+- [x] 10 novos testes (favoritar registra em ASSETS e persiste em disco, ticker inválido não muda nenhum estado, desfavoritar remove só o que foi favoritado - nunca um ativo real de config.json, `_load_web_favorites` restaura do disco no início e tolera arquivo ausente/corrompido/com ticker que não resolve mais) - 164 testes no total
+
 ---
 
 ## 🚧 Próximos Passos
 
-### Em andamento
-- [ ] Favoritos do dashboard web também entrarem no monitor de alertas/modo papel em segundo plano (hoje são só pra visualização, não geram apito/Telegram/posição simulada)
+Nada planejado no momento - sugestões são bem-vindas.
 
 ---
 

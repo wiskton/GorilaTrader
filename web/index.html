@@ -124,6 +124,7 @@
   <aside>
     <div class="card">
       <h2>⭐ Favoritos</h2>
+      <div style="color:var(--muted);font-size:11px;margin:-4px 0 10px">Lista compartilhada do servidor - favoritar passa a monitorar de verdade (apito/Telegram/modo papel).</div>
       <div class="fav-add">
         <input type="text" id="favInput" placeholder="Ex.: DOGE" maxlength="20" />
         <button id="favAddBtn">+</button>
@@ -543,74 +544,55 @@ function connectWebSocket(key) {
   };
 }
 
-// --- Favoritos: lista de tickers salva no navegador (localStorage), pra
-// clicar e trocar de ativo sem precisar que o ticker esteja pré-configurado
-// no config.json - resolvido sob demanda via /api/resolve/{ticker}. ---
-const FAVORITES_KEY = 'gorilatrader_favorites';
-let favorites = [];
+// --- Favoritos: lista ÚNICA do servidor (não mais por navegador) - favoritar
+// um ticker o registra de verdade como ativo monitorado (/api/favorites),
+// então passa a tocar apito/mandar Telegram/abrir posição no modo papel em
+// segundo plano, igual um ativo do config.json. Persistido em disco no
+// servidor, visível pra qualquer um que abrir esse dashboard. ---
+let favorites = {}; // ticker -> {name, icon, decimals}, vem de /api/favorites
 let favBusy = false;
 
-function loadFavorites() {
-  try {
-    const raw = localStorage.getItem(FAVORITES_KEY);
-    favorites = raw ? JSON.parse(raw) : [];
-  } catch (e) { favorites = []; }
-}
-function saveFavorites() {
-  try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites)); } catch (e) {}
-}
 function showFavError(msg) {
   const el = document.getElementById('favError');
   el.textContent = msg;
   el.hidden = !msg;
 }
 
-async function ensureAssetResolved(key) {
-  if (assets[key]) return assets[key];
-  const res = await fetch(`/api/resolve/${encodeURIComponent(key)}`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Não foi possível resolver ${key}`);
+async function loadFavorites() {
+  try {
+    const res = await fetch('/api/favorites');
+    favorites = res.ok ? await res.json() : {};
+  } catch (e) {
+    favorites = {};
   }
-  const cfg = await res.json();
-  assets[key] = { name: cfg.name, icon: cfg.icon, decimals: cfg.decimals };
-  return assets[key];
+  for (const [key, cfg] of Object.entries(favorites)) assets[key] = cfg;
+  buildFavorites();
 }
 
 function buildFavorites() {
   const el = document.getElementById('favList');
   el.innerHTML = '';
-  if (!favorites.length) {
+  const keys = Object.keys(favorites).sort();
+  if (!keys.length) {
     el.innerHTML = '<div class="fav-empty">Nenhum favorito ainda - digite um ticker acima.</div>';
     return;
   }
-  for (const key of favorites) {
+  for (const key of keys) {
     const row = document.createElement('div');
     row.className = 'fav-row' + (key === currentKey ? ' active' : '');
     const label = document.createElement('span');
     label.className = 'fav-label';
-    const icon = assets[key] ? assets[key].icon : '🪙';
-    label.textContent = `${icon} ${key}`;
+    label.textContent = `${favorites[key].icon} ${key}`;
     label.title = `Analisar ${key}`;
-    label.addEventListener('click', () => selectFavorite(key));
+    label.addEventListener('click', () => switchAsset(key));
     const rm = document.createElement('span');
     rm.className = 'fav-remove';
     rm.textContent = '×';
-    rm.title = 'Remover dos favoritos';
+    rm.title = 'Remover dos favoritos (para de ser monitorado)';
     rm.addEventListener('click', (e) => { e.stopPropagation(); removeFavorite(key); });
     row.appendChild(label);
     row.appendChild(rm);
     el.appendChild(row);
-  }
-}
-
-async function selectFavorite(key) {
-  showFavError('');
-  try {
-    await ensureAssetResolved(key);
-    switchAsset(key);
-  } catch (e) {
-    showFavError(e.message);
   }
 }
 
@@ -620,13 +602,16 @@ async function addFavorite(rawTicker) {
   showFavError('');
   favBusy = true;
   try {
-    await ensureAssetResolved(key);
-    if (!favorites.includes(key)) {
-      favorites.push(key);
-      saveFavorites();
+    const res = await fetch(`/api/favorites/${encodeURIComponent(key)}`, { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Não foi possível adicionar ${key}`);
     }
+    const cfg = await res.json();
+    favorites[cfg.key] = { name: cfg.name, icon: cfg.icon, decimals: cfg.decimals };
+    assets[cfg.key] = favorites[cfg.key];
     buildFavorites();
-    switchAsset(key);
+    switchAsset(cfg.key);
   } catch (e) {
     showFavError(e.message);
   } finally {
@@ -634,15 +619,18 @@ async function addFavorite(rawTicker) {
   }
 }
 
-function removeFavorite(key) {
-  favorites = favorites.filter(k => k !== key);
-  saveFavorites();
+async function removeFavorite(key) {
+  try {
+    await fetch(`/api/favorites/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  } catch (e) {
+    // mesmo se a chamada falhar, tira da lista local - próximo load ressincroniza
+  }
+  delete favorites[key];
   buildFavorites();
 }
 
 function setupFavoritesUI() {
   loadFavorites();
-  buildFavorites();
   document.getElementById('favAddBtn').addEventListener('click', () => {
     const input = document.getElementById('favInput');
     addFavorite(input.value);

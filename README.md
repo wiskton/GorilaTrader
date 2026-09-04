@@ -196,7 +196,11 @@ python3 gorilatrader.py --serve
 ```
 Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Charts](https://github.com/tradingview/lightweight-charts), open-source da própria TradingView) com overlays configuráveis (EMA9/21/50/200, Bandas de Bollinger, Canal Donchian, Nuvem de Ichimoku - as três últimas com a área entre as bandas sombreada, via uma primitiva de desenho customizada já que o Lightweight Charts v4 não tem série nativa de "preenchimento entre duas linhas") e um painel de oscilador (RSI/MACD/OBV) sincronizado. A barra lateral mostra sinal, score, Stop Loss/Take Profits e os fatores técnicos do ativo selecionado. A atualização é via **WebSocket** (`/ws/{ativo}`) - o servidor empurra gráfico + snapshot a cada ~20s sem o navegador precisar ficar re-consultando a API, com reconexão automática se a conexão cair. Use `--port` para trocar a porta e `--host 0.0.0.0` para acessar de outro dispositivo na rede.
 
-**⭐ Favoritos na barra lateral**: digite qualquer ticker (ex.: `DOGE`) na caixa "Favoritos" e clique em "+" - o servidor resolve o símbolo (par USDT na Binance, decimais detectados pelo preço, mesmo mecanismo do `--assets` do terminal) e adiciona à lista. Clique num favorito pra trocar o gráfico pra ele. A lista fica salva no `localStorage` do navegador (por dispositivo), não precisa estar em `config.json` nem reiniciar o servidor. Um ticker que não existe na Binance mostra um aviso e não é adicionado.
+**⭐ Favoritos na barra lateral**: digite qualquer ticker (ex.: `DOGE`) na caixa "Favoritos" e clique em "+" - o servidor resolve o símbolo (par USDT na Binance, decimais detectados pelo preço, mesmo mecanismo do `--assets` do terminal) e adiciona à lista. Clique num favorito pra trocar o gráfico pra ele.
+
+Diferente da v2.0, a lista de favoritos agora é **única e compartilhada do servidor** (persistida em `web_favorites.json`, não mais por navegador) - e favoritar um ticker o registra de verdade como ativo monitorado: a partir do próximo ciclo ele passa a tocar apito, mandar Telegram (se o sinal for FORTE) e abrir posição no modo papel, exatamente como um ativo do `config.json`. Desfavoritar para de monitorar (exceto os ativos que já vêm de `config.json`, esses nunca saem por aqui). Um ticker que não existe na Binance mostra um aviso e não é adicionado.
+
+⚠️ Se uma posição do modo papel estiver aberta num favorito no momento de desfavoritá-lo, ela fica parada (sem novas atualizações) até o ativo ser favoritado de novo - não fecha automaticamente.
 
 **📝 Modo Papel no dashboard**: o botão "📝 Modo Papel" no cabeçalho abre um painel com a mesma performance do `--paper-report` do terminal (taxa de acerto, R médio, retorno % por direção, posições abertas e últimas entradas fechadas) - lê do mesmo motor que roda em segundo plano no `--serve` (`/api/paper-trading`).
 
@@ -301,7 +305,7 @@ Ou com Docker Compose (lê `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` de um arquivo
 docker compose up -d
 ```
 
-O volume em `/data` (controlado por `GORILATRADER_DATA_DIR`) persiste `config.json`, `alerts_history.json`, `paper_trades.json` e `gorilatrader.log` entre restarts/rebuilds - sem ele, o histórico (incluindo o do modo papel) reseta a cada `docker compose up`.
+O volume em `/data` (controlado por `GORILATRADER_DATA_DIR`) persiste `config.json`, `alerts_history.json`, `paper_trades.json`, `web_favorites.json` e `gorilatrader.log` entre restarts/rebuilds - sem ele, o histórico (incluindo modo papel e favoritos do dashboard web) reseta a cada `docker compose up`.
 
 ---
 
@@ -328,7 +332,7 @@ GorilaTrader/
 └── README.md
 
 # Gerados em tempo de execução (ignorados pelo git):
-# config.json, alerts_history.json, paper_trades.json, gorilatrader.log
+# config.json, alerts_history.json, paper_trades.json, web_favorites.json, gorilatrader.log
 ```
 
 ---
