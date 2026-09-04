@@ -8,6 +8,7 @@ Ativos monitorados: Bitcoin (BTC), Ethereum (ETH), Solana (SOL), Pepe (PEPE) e H
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
 import os
@@ -47,10 +48,12 @@ logging.basicConfig(
 logger = logging.getLogger("gorilatrader")
 
 # ---------------------------------------------------------------------------
-# Configuração dos Ativos Monitorados
+# Configuração dos Ativos Monitorados e dos Pesos da Matriz de Confluência
+# Pode ser sobrescrita por config.json (mesma pasta do script) sem editar o
+# código - veja config.example.json para o formato aceito.
 # ---------------------------------------------------------------------------
 
-ASSETS = {
+DEFAULT_ASSETS = {
     "BTC": {
         "name": "Bitcoin",
         "symbol": "BTCUSDT",
@@ -88,11 +91,105 @@ ASSETS = {
     },
 }
 
+# Pontuação de cada fator da matriz de confluência (-100 a +100 no total).
+# Ajustável via a chave "weights" em config.json sem tocar no código.
+DEFAULT_WEIGHTS = {
+    "trend_full": 35,       # Preço > EMA9 > EMA21 > EMA50 (ou o inverso)
+    "trend_partial": 20,    # Alinhamento parcial de EMA9/EMA21
+    "trend_ema200": 10,     # Preço vs. EMA200 (tendência primária)
+    "macd_cross": 25,       # Cruzamento fresco do histograma MACD
+    "macd_accel": 15,       # Histograma MACD acelerando na mesma direção
+    "rsi_extreme": 20,      # RSI < 30 (sobrevendido) ou > 70 (sobrecomprado)
+    "rsi_exit": 25,         # RSI saindo de zona de sobrevenda/sobrecompra
+    "rsi_trend_zone": 15,   # RSI na zona de tendência (50-65) ou fraqueza (35-48)
+    "bollinger_band": 15,   # Preço tocando banda de Bollinger
+    "volume_spike": 10,     # Volume >= 1.5x a média de 20 períodos
+    "channel_breakout": 15, # Rompimento do canal Donchian(20)
+    "obv_confirm": 8,       # OBV confirma a direção do preço
+    "obv_divergence": 5,    # Divergência entre OBV e preço
+    "ichimoku_cloud": 10,   # Posição do preço em relação à Nuvem de Ichimoku
+    "ichimoku_tk_cross": 10,  # Cruzamento Tenkan/Kijun
+}
+
 API_URLS = {
     "binance_spot": "https://api.binance.com/api/v3/klines",
     "binance_futures": "https://fapi.binance.com/fapi/v1/klines",
     "bybit_spot": "https://api.bybit.com/v5/market/kline",
 }
+
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+
+def load_config(path: str = CONFIG_PATH) -> Tuple[dict, dict, dict]:
+    """Carrega ativos, pesos e credenciais do Telegram de config.json, mesclando
+    com os padrões.
+
+    Se o arquivo não existir ou estiver malformado, usa somente os padrões
+    embutidos - o programa nunca deixa de funcionar por causa de config.json.
+    """
+    assets = dict(DEFAULT_ASSETS)
+    weights = dict(DEFAULT_WEIGHTS)
+    telegram: dict = {}
+
+    if not os.path.exists(path):
+        return assets, weights, telegram
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        logger.error("Falha ao ler %s: %s. Usando configuração padrão.", path, exc)
+        return assets, weights, telegram
+
+    if isinstance(data.get("assets"), dict) and data["assets"]:
+        assets = data["assets"]
+    if isinstance(data.get("weights"), dict):
+        weights.update(data["weights"])
+    if isinstance(data.get("telegram"), dict):
+        telegram = data["telegram"]
+
+    return assets, weights, telegram
+
+
+def resolve_telegram_credentials(telegram_cfg: dict) -> Tuple[Optional[str], Optional[str]]:
+    """Variáveis de ambiente têm prioridade sobre config.json (evita segredo em arquivo versionado)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN") or telegram_cfg.get("bot_token")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID") or telegram_cfg.get("chat_id")
+    return token, chat_id
+
+
+ASSETS, WEIGHTS, TELEGRAM_CFG = load_config()
+
+# ---------------------------------------------------------------------------
+# Persistência do Histórico de Alertas (sobrevive a reinícios do programa)
+# ---------------------------------------------------------------------------
+
+ALERTS_HISTORY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alerts_history.json")
+MAX_HISTORY_ENTRIES = 200
+
+
+def load_alert_history(path: str = ALERTS_HISTORY_PATH) -> List[dict]:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except Exception as exc:
+        logger.warning("Falha ao ler histórico de alertas (%s): %s", path, exc)
+    return []
+
+
+def save_alert_history(history: List[dict], path: str = ALERTS_HISTORY_PATH) -> None:
+    try:
+        trimmed = history[-MAX_HISTORY_ENTRIES:]
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(trimmed, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    except Exception:
+        logger.warning("Falha ao salvar histórico de alertas", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +301,51 @@ class SoundEngine:
 
 
 # ---------------------------------------------------------------------------
+# Notificações Telegram (opcional - todos os avisos também são enviados)
+# ---------------------------------------------------------------------------
+
+class TelegramNotifier:
+    """Envia os alertas do GorilaTrader para um chat do Telegram via Bot API.
+
+    Fica automaticamente desativado se não houver credenciais configuradas
+    (variáveis de ambiente TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, ou a seção
+    "telegram" em config.json) - o programa nunca falha por causa disso.
+    """
+
+    API_BASE = "https://api.telegram.org"
+
+    def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
+        self.bot_token = bot_token
+        self.chat_id = chat_id
+        self.enabled = bool(bot_token and chat_id)
+        if not self.enabled:
+            logger.info(
+                "Telegram não configurado (defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID, "
+                "ou a seção 'telegram' em config.json) - alertas não serão enviados para o Telegram."
+            )
+
+    def send(self, text: str) -> None:
+        """Envia a mensagem de forma assíncrona (não bloqueia o loop do dashboard)."""
+        if not self.enabled:
+            return
+
+        def _runner():
+            try:
+                url = f"{self.API_BASE}/bot{self.bot_token}/sendMessage"
+                r = requests.post(
+                    url,
+                    json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
+                    timeout=8,
+                )
+                if r.status_code != 200:
+                    logger.warning("Falha ao enviar alerta ao Telegram: HTTP %s - %s", r.status_code, r.text[:200])
+            except Exception:
+                logger.warning("Erro ao enviar alerta ao Telegram", exc_info=True)
+
+        threading.Thread(target=_runner, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
 # Motor de Indicadores Técnicos e Análise Quantitativa (1h)
 # ---------------------------------------------------------------------------
 
@@ -227,6 +369,7 @@ class MarketData:
     bb_upper: float
     bb_lower: float
     bb_middle: float
+    bb_zscore: float  # distância do preço à média em desvios-padrão (Bollinger 20)
     atr: float
     volume_ratio: float
     donchian_upper: float
@@ -297,11 +440,23 @@ class CryptoAnalyzer:
         return None
 
     @classmethod
-    def analyze_asset(cls, key: str, config: dict) -> Optional[MarketData]:
+    def analyze_asset(cls, key: str, config: dict, weights: Optional[dict] = None) -> Optional[MarketData]:
         df = cls.fetch_klines(config["symbol"], config["exchange"], interval="1h", limit=250)
         if df is None or len(df) < 50:
             logger.warning("Dados insuficientes para %s (%s candles)", key, 0 if df is None else len(df))
             return None
+        return cls.analyze_dataframe(key, config, df, weights)
+
+    @classmethod
+    def analyze_dataframe(
+        cls, key: str, config: dict, df: pd.DataFrame, weights: Optional[dict] = None
+    ) -> Optional[MarketData]:
+        """Calcula os indicadores e a matriz de confluência a partir de um
+        DataFrame de candles já carregado (separado de analyze_asset para
+        permitir testar a lógica de decisão sem depender de rede)."""
+        if df is None or len(df) < 50:
+            return None
+        w = weights or WEIGHTS
 
         c = df["close"]
         h = df["high"]
@@ -382,6 +537,8 @@ class CryptoAnalyzer:
         b_up = float(bb_upper.iloc[-1])
         b_low = float(bb_lower.iloc[-1])
         b_mid = float(sma20.iloc[-1])
+        b_std = float(std20.iloc[-1])
+        bb_zscore = (price - b_mid) / (b_std + 1e-9)
 
         atr = float(atr_series.iloc[-1])
 
@@ -437,117 +594,117 @@ class CryptoAnalyzer:
         score = 0
         reasons = []
 
-        # --- A) TENDÊNCIA E ALINHAMENTO DE MÉDIAS (até +/- 35 pts) ---
+        # --- A) TENDÊNCIA E ALINHAMENTO DE MÉDIAS ---
         if price > e9 > e21 > e50:
-            score += 35
+            score += w["trend_full"]
             reasons.append("Alinhamento clássico de alta (Preço > EMA9 > EMA21 > EMA50)")
         elif price > e21 and e9 > e21:
-            score += 20
+            score += w["trend_partial"]
             reasons.append("Tendência de alta de curto prazo (EMA9 > EMA21)")
         elif price < e9 < e21 < e50:
-            score -= 35
+            score -= w["trend_full"]
             reasons.append("Alinhamento clássico de baixa (Preço < EMA9 < EMA21 < EMA50)")
         elif price < e21 and e9 < e21:
-            score -= 20
+            score -= w["trend_partial"]
             reasons.append("Tendência de baixa de curto prazo (EMA9 < EMA21)")
 
         if price > e200:
-            score += 10
+            score += w["trend_ema200"]
         else:
-            score -= 10
+            score -= w["trend_ema200"]
 
-        # --- B) MOMENTUM MACD (até +/- 25 pts) ---
+        # --- B) MOMENTUM MACD ---
         fresh_bull_cross = (prev_m_hist <= 0 and m_hist > 0)
         fresh_bear_cross = (prev_m_hist >= 0 and m_hist < 0)
 
         if fresh_bull_cross:
-            score += 25
+            score += w["macd_cross"]
             reasons.append("Cruzamento altista recente no MACD (Gatilho de Compra)")
         elif m_hist > 0 and m_hist > prev_m_hist:
-            score += 15
+            score += w["macd_accel"]
             reasons.append("Histograma MACD positivo e acelerando")
         elif fresh_bear_cross:
-            score -= 25
+            score -= w["macd_cross"]
             reasons.append("Cruzamento baixista recente no MACD (Gatilho de Venda)")
         elif m_hist < 0 and m_hist < prev_m_hist:
-            score -= 15
+            score -= w["macd_accel"]
             reasons.append("Histograma MACD negativo e acelerando para baixo")
 
-        # --- C) FORÇA RELATIVA - RSI (até +/- 25 pts) ---
+        # --- C) FORÇA RELATIVA - RSI ---
         if rsi < 30:
-            score += 20
+            score += w["rsi_extreme"]
             reasons.append(f"RSI extremamente sobrevendido ({rsi:.1f}) - potencial repique")
         elif prev_rsi < 35 and rsi >= 35:
-            score += 25
+            score += w["rsi_exit"]
             reasons.append(f"RSI saindo da sobrevenda rompendo 35 ({rsi:.1f})")
         elif 50 <= rsi <= 65 and rsi > prev_rsi:
-            score += 15
+            score += w["rsi_trend_zone"]
             reasons.append(f"RSI na zona ideal de tendência de alta ({rsi:.1f})")
         elif rsi > 70:
-            score -= 20
+            score -= w["rsi_extreme"]
             reasons.append(f"RSI extremamente sobrecomprado ({rsi:.1f}) - risco de correção")
         elif prev_rsi > 65 and rsi <= 65:
-            score -= 25
+            score -= w["rsi_exit"]
             reasons.append(f"RSI perdendo força saindo de sobrecompra ({rsi:.1f})")
         elif 35 <= rsi <= 48 and rsi < prev_rsi:
-            score -= 15
+            score -= w["rsi_trend_zone"]
             reasons.append(f"RSI na zona de fraqueza baixista ({rsi:.1f})")
 
-        # --- D) VOLATILIDADE E BANDAS DE BOLLINGER (até +/- 15 pts) ---
+        # --- D) VOLATILIDADE E BANDAS DE BOLLINGER ---
         if price <= b_low * 1.005:
-            score += 15
+            score += w["bollinger_band"]
             reasons.append("Preço tocando a Banda Inferior de Bollinger (suporte)")
         elif price >= b_up * 0.995:
-            score -= 15
+            score -= w["bollinger_band"]
             reasons.append("Preço tocando a Banda Superior de Bollinger (resistência)")
 
-        # --- E) CONFIRMAÇÃO DE VOLUME - PICO RELATIVO (até +/- 10 pts) ---
+        # --- E) CONFIRMAÇÃO DE VOLUME - PICO RELATIVO ---
         if current_vol_ratio >= 1.5:
             if change_1h > 0:
-                score += 10
+                score += w["volume_spike"]
                 reasons.append(f"Volume expressivo de alta ({current_vol_ratio:.1f}x da média)")
             else:
-                score -= 10
+                score -= w["volume_spike"]
                 reasons.append(f"Volume expressivo de venda ({current_vol_ratio:.1f}x da média)")
 
-        # --- F) ROMPIMENTO DE CANAL - DONCHIAN 20 (até +/- 15 pts) ---
+        # --- F) ROMPIMENTO DE CANAL - DONCHIAN 20 ---
         if channel_breakout_up:
-            score += 15
+            score += w["channel_breakout"]
             reasons.append("Rompimento do canal Donchian(20) - nova máxima de 20 períodos")
         elif channel_breakout_down:
-            score -= 15
+            score -= w["channel_breakout"]
             reasons.append("Rompimento do canal Donchian(20) - nova mínima de 20 períodos")
 
-        # --- G) FLUXO DE VOLUME - OBV (até +/- 8 pts, detecta divergência oculta) ---
+        # --- G) FLUXO DE VOLUME - OBV (detecta divergência oculta) ---
         if obv_trend == "ALTA":
-            score += 8
+            score += w["obv_confirm"]
             reasons.append("OBV confirma fluxo comprador (acumulação)")
         elif obv_trend == "BAIXA":
-            score -= 8
+            score -= w["obv_confirm"]
             reasons.append("OBV confirma fluxo vendedor (distribuição)")
         elif not obv_up and price_up:
-            score -= 5
+            score -= w["obv_divergence"]
             reasons.append("Divergência de baixa: preço sobe mas OBV cai (fraqueza oculta)")
         elif obv_up and not price_up:
-            score += 5
+            score += w["obv_divergence"]
             reasons.append("Divergência de alta: preço cai mas OBV sobe (acumulação oculta)")
 
-        # --- H) ICHIMOKU KINKO HYO (até +/- 20 pts) ---
+        # --- H) ICHIMOKU KINKO HYO ---
         if ichimoku_ready:
             if price > cloud_top:
-                score += 10
+                score += w["ichimoku_cloud"]
                 reasons.append("Preço acima da Nuvem de Ichimoku (viés estrutural de alta)")
             elif price < cloud_bottom:
-                score -= 10
+                score -= w["ichimoku_cloud"]
                 reasons.append("Preço abaixo da Nuvem de Ichimoku (viés estrutural de baixa)")
             else:
                 reasons.append("Preço dentro da Nuvem de Ichimoku (estrutura indefinida)")
 
             if fresh_tk_bull:
-                score += 10
+                score += w["ichimoku_tk_cross"]
                 reasons.append("Cruzamento altista Tenkan/Kijun (Ichimoku)")
             elif fresh_tk_bear:
-                score -= 10
+                score -= w["ichimoku_tk_cross"]
                 reasons.append("Cruzamento baixista Tenkan/Kijun (Ichimoku)")
 
         # Normaliza pontuação
@@ -605,6 +762,7 @@ class CryptoAnalyzer:
             bb_upper=b_up,
             bb_lower=b_low,
             bb_middle=b_mid,
+            bb_zscore=bb_zscore,
             atr=atr,
             volume_ratio=current_vol_ratio,
             donchian_upper=d_upper_now,
@@ -632,12 +790,22 @@ class CryptoAnalyzer:
 class GorilaTraderTerminal:
     """Gerenciador do loop em tempo real e visualização no terminal."""
 
-    def __init__(self, interval: int = 30, sound_enabled: bool = True, use_voice: bool = False):
+    def __init__(
+        self,
+        interval: int = 30,
+        sound_enabled: bool = True,
+        use_voice: bool = False,
+        telegram_token: Optional[str] = None,
+        telegram_chat_id: Optional[str] = None,
+    ):
         self.interval = interval
         self.sound = SoundEngine(enabled=sound_enabled, use_voice=use_voice)
+        self.telegram = TelegramNotifier(telegram_token, telegram_chat_id)
         self.console = Console()
-        self.history_alerts: List[dict] = []
+        self.history_alerts: List[dict] = load_alert_history()
         self.last_signals: Dict[str, str] = {}
+        self.last_rsi_extreme: Dict[str, Optional[str]] = {}
+        self.last_bb_extreme: Dict[str, Optional[str]] = {}
         self.stale: Dict[str, bool] = {}
         self.iteration = 0
 
@@ -665,6 +833,7 @@ class GorilaTraderTerminal:
                 data_map[key] = res
                 self.stale[key] = False
                 self.check_and_alert(res)
+                self.check_extreme_alerts(res)
             else:
                 self.stale[key] = True
         return data_map
@@ -687,9 +856,10 @@ class GorilaTraderTerminal:
         )
 
         sound_status = "[bold green]🔊 APITO ATIVO[/bold green]" if self.sound.enabled else "[yellow]🔇 MUDO[/yellow]"
+        telegram_status = "[bold green]📨 TELEGRAM ATIVO[/bold green]" if self.telegram.enabled else "[dim]📨 Telegram off[/dim]"
         time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         header_text = Text.from_markup(
-            f" [bold cyan]GORILATRADER[/bold cyan] · Análise 1h Cripto em Tempo Real · {sound_status} · 🕒 {time_str}"
+            f" [bold cyan]GORILATRADER[/bold cyan] · Análise 1h Cripto em Tempo Real · {sound_status} · {telegram_status} · 🕒 {time_str}"
         )
         layout["header"].update(Panel(header_text, style="cyan", box=box.ROUNDED))
 
@@ -846,36 +1016,95 @@ class GorilaTraderTerminal:
 
         return layout
 
+    def _record_alert(self, item: MarketData, label: str, bullish: bool, detail: str):
+        """Ponto único de disparo de qualquer aviso: apito, histórico (persistido) e Telegram."""
+        key = item.asset_key
+        p_str = self.format_price(item.price, ASSETS[key]["decimals"])
+
+        if bullish:
+            self.sound.play_buy_alert(item.name)
+        else:
+            self.sound.play_sell_alert(item.name)
+
+        self.history_alerts.append({
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "asset": f"{ASSETS[key]['icon']} {key}",
+            "signal": label,
+            "price": p_str,
+            "reason": detail,
+        })
+        self.history_alerts = self.history_alerts[-MAX_HISTORY_ENTRIES:]
+        save_alert_history(self.history_alerts)
+
+        emoji = "🟢" if bullish else "🔴"
+        text = (
+            f"{emoji} <b>GorilaTrader</b> · {ASSETS[key]['icon']} <b>{key}</b>\n"
+            f"{label}\n"
+            f"Preço: {p_str}\n"
+            f"{detail}\n"
+            f"🕒 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        )
+        self.telegram.send(text)
+
     def check_and_alert(self, item: MarketData):
-        """Verifica se houve mudança de sinal e aciona o apito de compra/venda."""
+        """Verifica se houve mudança de sinal (COMPRA/VENDA) e dispara o aviso."""
         key = item.asset_key
         last_sig = self.last_signals.get(key)
         current_sig = item.signal
 
         if current_sig in ("COMPRA", "FORTE COMPRA") and last_sig not in ("COMPRA", "FORTE COMPRA"):
-            self.sound.play_buy_alert(item.name)
-            p_str = self.format_price(item.price, ASSETS[key]["decimals"])
             reason_summary = " · ".join(item.reasons[:2]) if item.reasons else "Confluência altista confirmada"
-            self.history_alerts.append({
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "asset": f"{ASSETS[key]['icon']} {key}",
-                "signal": current_sig,
-                "price": p_str,
-                "reason": reason_summary,
-            })
+            self._record_alert(item, current_sig, bullish=True, detail=reason_summary)
         elif current_sig in ("VENDA", "FORTE VENDA") and last_sig not in ("VENDA", "FORTE VENDA"):
-            self.sound.play_sell_alert(item.name)
-            p_str = self.format_price(item.price, ASSETS[key]["decimals"])
             reason_summary = " · ".join(item.reasons[:2]) if item.reasons else "Confluência baixista confirmada"
-            self.history_alerts.append({
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "asset": f"{ASSETS[key]['icon']} {key}",
-                "signal": current_sig,
-                "price": p_str,
-                "reason": reason_summary,
-            })
+            self._record_alert(item, current_sig, bullish=False, detail=reason_summary)
 
         self.last_signals[key] = current_sig
+
+    def check_extreme_alerts(self, item: MarketData):
+        """Alertas independentes do score: RSI estourado (>80/<20) e rompimento
+        muito forte das Bandas de Bollinger (>= 2.5 desvios-padrão da média)."""
+        key = item.asset_key
+
+        if item.rsi >= 80:
+            rsi_state = "OVERBOUGHT"
+        elif item.rsi <= 20:
+            rsi_state = "OVERSOLD"
+        else:
+            rsi_state = None
+
+        if rsi_state and self.last_rsi_extreme.get(key) != rsi_state:
+            if rsi_state == "OVERBOUGHT":
+                self._record_alert(
+                    item, "⚠ RSI ESTOURADO (SOBRECOMPRA)", bullish=False,
+                    detail=f"RSI({item.rsi:.1f}) acima de 80 - risco elevado de correção",
+                )
+            else:
+                self._record_alert(
+                    item, "⚠ RSI ESTOURADO (SOBREVENDA)", bullish=True,
+                    detail=f"RSI({item.rsi:.1f}) abaixo de 20 - potencial repique forte",
+                )
+        self.last_rsi_extreme[key] = rsi_state
+
+        if item.bb_zscore >= 2.5:
+            bb_state = "UPPER"
+        elif item.bb_zscore <= -2.5:
+            bb_state = "LOWER"
+        else:
+            bb_state = None
+
+        if bb_state and self.last_bb_extreme.get(key) != bb_state:
+            if bb_state == "UPPER":
+                self._record_alert(
+                    item, "⚠ ROMPIMENTO FORTE - BANDA SUPERIOR DE BOLLINGER", bullish=False,
+                    detail=f"Preço a {item.bb_zscore:+.1f}σ da média (Bollinger 20) - exaustão de alta",
+                )
+            else:
+                self._record_alert(
+                    item, "⚠ ROMPIMENTO FORTE - BANDA INFERIOR DE BOLLINGER", bullish=True,
+                    detail=f"Preço a {item.bb_zscore:+.1f}σ da média (Bollinger 20) - exaustão de baixa",
+                )
+        self.last_bb_extreme[key] = bb_state
 
     def run_once(self):
         """Executa uma análise detalhada imediata e imprime no terminal."""
@@ -1003,8 +1232,34 @@ def main():
         action="store_true",
         help="Toca os apitos de Compra e Venda para teste e encerra",
     )
+    parser.add_argument(
+        "--no-telegram",
+        action="store_true",
+        help="Desativa o envio de alertas para o Telegram mesmo se TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID estiverem configurados",
+    )
+    parser.add_argument(
+        "--test-telegram",
+        action="store_true",
+        help="Envia uma mensagem de teste para o Telegram configurado e encerra",
+    )
 
     args = parser.parse_args()
+
+    telegram_token, telegram_chat_id = resolve_telegram_credentials(TELEGRAM_CFG)
+    if args.no_telegram:
+        telegram_token, telegram_chat_id = None, None
+
+    if args.test_telegram:
+        console = Console()
+        notifier = TelegramNotifier(telegram_token, telegram_chat_id)
+        if not notifier.enabled:
+            console.print("[red]❌ Telegram não configurado. Defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID (ou config.json).[/red]")
+            return
+        console.print("[bold yellow]📨 Enviando mensagem de teste para o Telegram...[/bold yellow]")
+        notifier.send("🦍 <b>GorilaTrader</b>\nMensagem de teste - a integração com o Telegram está funcionando!")
+        time.sleep(2)
+        console.print("[bold green]✅ Mensagem enviada (verifique o Telegram).[/bold green]")
+        return
 
     if args.test_sound:
         console = Console()
@@ -1022,6 +1277,8 @@ def main():
         interval=max(5, args.interval),
         sound_enabled=not args.no_sound,
         use_voice=args.voice,
+        telegram_token=telegram_token,
+        telegram_chat_id=telegram_chat_id,
     )
 
     if args.once:

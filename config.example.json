@@ -1,0 +1,35 @@
+{
+  "_comment": "Copie este arquivo para config.json para customizar sem editar o código. Todas as seções são opcionais - o que não for definido usa o padrão embutido.",
+
+  "assets": {
+    "BTC": { "name": "Bitcoin", "symbol": "BTCUSDT", "exchange": "binance_spot", "icon": "₿", "decimals": 2 },
+    "ETH": { "name": "Ethereum", "symbol": "ETHUSDT", "exchange": "binance_spot", "icon": "⟠", "decimals": 2 },
+    "SOL": { "name": "Solana", "symbol": "SOLUSDT", "exchange": "binance_spot", "icon": "◎", "decimals": 2 },
+    "PEPE": { "name": "Pepe", "symbol": "PEPEUSDT", "exchange": "binance_spot", "icon": "🐸", "decimals": 8 },
+    "HYPE": { "name": "Hyperliquid", "symbol": "HYPEUSDT", "exchange": "binance_futures", "icon": "⚡", "decimals": 3 }
+  },
+
+  "weights": {
+    "trend_full": 35,
+    "trend_partial": 20,
+    "trend_ema200": 10,
+    "macd_cross": 25,
+    "macd_accel": 15,
+    "rsi_extreme": 20,
+    "rsi_exit": 25,
+    "rsi_trend_zone": 15,
+    "bollinger_band": 15,
+    "volume_spike": 10,
+    "channel_breakout": 15,
+    "obv_confirm": 8,
+    "obv_divergence": 5,
+    "ichimoku_cloud": 10,
+    "ichimoku_tk_cross": 10
+  },
+
+  "telegram": {
+    "_comment": "Prefira as variáveis de ambiente TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID em vez de colocar o token aqui. Se usar este arquivo, NÃO o versione (config.json já está no .gitignore).",
+    "bot_token": "",
+    "chat_id": ""
+  }
+}

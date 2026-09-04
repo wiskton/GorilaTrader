@@ -69,7 +69,48 @@ O score final varia de **-100 a +100** e classifica o sinal (veja a tabela mais 
 
 - **🟢 Sinal de COMPRA / FORTE COMPRA**: Toca um apito melódico ascendente animado (tríade musical C5 ➔ E5 ➔ G5) + sinal do terminal `\a`.
 - **🔴 Sinal de VENDA / FORTE VENDA**: Toca um apito descendente incisivo de alerta (A5 ➔ F5 ➔ D5) + sinal do terminal `\a`.
-- **Filtro Anti-Spam**: O sistema só apita quando ocorre uma **nova transição de sinal** para evitar repetições desnecessárias.
+- **⚠ RSI Estourado**: dispara um aviso próprio (independente do score) sempre que o RSI(14) ultrapassa **80** (sobrecompra extrema) ou cai abaixo de **20** (sobrevenda extrema).
+- **⚠ Rompimento Forte de Bollinger**: dispara quando o preço fecha a **2.5 desvios-padrão ou mais** da média móvel de 20 períodos (muito além do simples toque na banda que já entra no score) - indica um movimento estatisticamente extremo/exaustão.
+- **Filtro Anti-Spam**: cada tipo de alerta só dispara novamente quando o estado muda (ex.: some da sobrecompra e volta a entrar) - sem repetição a cada ciclo enquanto a condição persiste.
+- **Histórico Persistente**: os últimos 200 alertas ficam salvos em `alerts_history.json` e sobrevivem a reinícios do programa (arquivo local, não versionado).
+
+---
+
+## 📨 Notificações no Telegram
+
+Todos os avisos (sinais de COMPRA/VENDA, RSI estourado e rompimento forte de Bollinger) também podem ser enviados para um chat do Telegram, além do apito local.
+
+1. Crie um bot com o [@BotFather](https://t.me/BotFather) e copie o token.
+2. Descubra o `chat_id` (fale com o bot e use o [@userinfobot](https://t.me/userinfobot), ou acesse `https://api.telegram.org/bot<TOKEN>/getUpdates` depois de mandar uma mensagem ao bot).
+3. Configure as credenciais por variável de ambiente (recomendado, evita segredo em arquivo):
+   ```bash
+   export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
+   export TELEGRAM_CHAT_ID="987654321"
+   ```
+   ...ou copie `config.example.json` para `config.json` e preencha a seção `"telegram"` (esse arquivo já está no `.gitignore`, nunca é versionado).
+4. Teste com:
+   ```bash
+   python3 gorilatrader.py --test-telegram
+   ```
+
+Se as credenciais não estiverem configuradas, o programa funciona normalmente e apenas não envia nada ao Telegram (sem erro). Use `--no-telegram` para desativar mesmo com credenciais configuradas.
+
+---
+
+## ⚙️ Configuração (Ativos e Pesos da Matriz)
+
+Por padrão o GorilaTrader já vem configurado com BTC/ETH/SOL/PEPE/HYPE e os pesos descritos na seção de estratégia. Para customizar sem editar o código:
+
+```bash
+cp config.example.json config.json
+```
+
+Edite `config.json` (ignorado pelo git) para:
+- **`assets`**: trocar os ativos monitorados (qualquer par `*USDT` da Binance spot ou futures).
+- **`weights`**: ajustar a pontuação de cada fator da matriz de confluência (ex.: aumentar o peso do Ichimoku, reduzir o de RSI).
+- **`telegram`**: credenciais do bot (alternativa às variáveis de ambiente).
+
+Qualquer chave omitida usa o valor padrão - não é preciso repetir tudo, só o que quiser mudar.
 
 ---
 
@@ -114,6 +155,11 @@ Além do apito sonoro, o sistema fala em português o ativo e o sinal:
 python3 gorilatrader.py --voice
 ```
 
+### 6. Testar a Integração com o Telegram
+```bash
+python3 gorilatrader.py --test-telegram
+```
+
 ---
 
 ## 📊 Classificação dos Sinais
@@ -132,12 +178,16 @@ python3 gorilatrader.py --voice
 
 ```
 GorilaTrader/
-├── gorilatrader.py      # Motor de análise + dashboard no terminal (Rich)
-├── run.sh               # Script de inicialização (abre terminal se clicado fora de um)
-├── requirements.txt     # Dependências Python
-├── gorilatrader.png     # Ícone pixel art do app
-├── ROADMAP.md            # Próximos passos planejados
+├── gorilatrader.py         # Motor de análise + dashboard no terminal (Rich)
+├── run.sh                  # Script de inicialização (abre terminal se clicado fora de um)
+├── requirements.txt        # Dependências Python
+├── config.example.json     # Modelo de configuração (copie para config.json)
+├── gorilatrader.png        # Ícone pixel art do app
+├── ROADMAP.md               # Próximos passos planejados
 └── README.md
+
+# Gerados em tempo de execução (ignorados pelo git):
+# config.json, alerts_history.json, gorilatrader.log
 ```
 
 ---

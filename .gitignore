@@ -4,3 +4,8 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+.pytest_cache/
+
+# Estado/segredos locais - nunca versionar
+config.json
+alerts_history.json
