@@ -23,7 +23,7 @@ from typing import List, Optional
 
 import numpy as np
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from gorilatrader import (
     ASSETS,
@@ -55,6 +55,7 @@ INTERVAL_SECONDS = {
 }
 ALERT_CHECK_INTERVAL_SECONDS = 60  # cadência do monitor de alertas em segundo plano
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+FAVICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gorilatrader.png")
 
 # ---------------------------------------------------------------------------
 # Autenticação simples (opcional) - protege o dashboard quando exposto fora
@@ -113,6 +114,7 @@ def require_auth(request: Request) -> None:
 _LOGIN_PAGE = """<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GorilaTrader Web - Login</title>
+<link rel="icon" type="image/png" href="/favicon.png" />
 <style>
 body{{background:#0b0f14;color:#e6ebf2;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
 form{{background:#11161d;border:1px solid #232a35;border-radius:10px;padding:28px 32px;min-width:280px;}}
@@ -593,6 +595,14 @@ async def ws_updates(websocket: WebSocket, key: str):
             await asyncio.sleep(WS_INTERVAL_SECONDS)
     except WebSocketDisconnect:
         pass
+
+
+@app.get("/favicon.png")
+def favicon():
+    """Ícone da aba do navegador - o mesmo pixel art usado no atalho do menu
+    de aplicativos (gorilatrader.png). Sem autenticação: o navegador pede o
+    favicon antes de qualquer login, e não é dado sensível."""
+    return FileResponse(FAVICON_PATH, media_type="image/png")
 
 
 @app.get("/", response_class=HTMLResponse)

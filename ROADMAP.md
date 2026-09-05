@@ -144,6 +144,9 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] MACD e Bandas de Bollinger já existiam (MACD no dropdown de osciladores, Bollinger nos overlays) - conferidos e mantidos
 - [x] `_OKX_INTERVAL_MAP`/`_KRAKEN_INTERVAL_MAP` expandidos pra cobrir os 8 novos timeframes (Kraken não tem candle nativo de 3min nem de 1 mês - cai pro mais próximo que ela suporta: 5min e 15 dias)
 - [x] 5 novos testes (payload inclui EMA14/volume_ma21, `interval` inválido rejeitado com 400, intervalo customizado repassado de verdade pra exchange, mapeamento dos novos timeframes pra OKX e pra Kraken) - 169 testes no total
+- [x] Bandas de Bollinger passaram a mostrar também a **média do meio** (SMA 20) - o backend já calculava (`bb_middle`), só faltava o frontend desenhar a linha
+- [x] **Favicon** no dashboard web: reaproveita o ícone pixel art do atalho de desktop (`gorilatrader.png`), servido em `/favicon.png` sem exigir login (igual a página de `/login`) - aparece na aba do navegador tanto no dashboard quanto na tela de login
+- [x] 1 novo teste (favicon serve o arquivo certo com o content-type certo) - 170 testes no total
 
 ---
 

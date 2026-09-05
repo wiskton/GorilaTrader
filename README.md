@@ -198,7 +198,9 @@ Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Ch
 
 **⏱ Seletor de timeframe**: botões acima do gráfico trocam entre `3m`/`5m`/`15m`/`1h`/`4h`/`1D`/`1S`/`1M` - troca só a visualização do gráfico (candles/indicadores), o sinal/score da barra lateral continua sempre calculado no gráfico de 1h (é a identidade do projeto). Trocar de ativo ou de timeframe reenquadra o gráfico uma vez; as atualizações periódicas seguintes do WebSocket (a cada ~20s) só atualizam os dados **sem** resetar seu zoom/posição na tela.
 
-**Cores das EMAs**: EMA9 azul claro, EMA14 verde claro, EMA21 amarelo, EMA50 laranja, EMA200 branco. **Ichimoku**: Tenkan (primeira média) verde, Kijun (segunda média) amarelo. O volume vem com uma **média móvel de 21 períodos em amarelo** sobreposta às barras.
+**Cores das EMAs**: EMA9 azul claro, EMA14 verde claro, EMA21 amarelo, EMA50 laranja, EMA200 branco. **Ichimoku**: Tenkan (primeira média) verde, Kijun (segunda média) amarelo. O volume vem com uma **média móvel de 21 períodos em amarelo** sobreposta às barras, e as **Bandas de Bollinger** agora mostram a média do meio (SMA 20) além das bandas superior/inferior.
+
+A aba do navegador usa o mesmo ícone pixel art do atalho de desktop (`gorilatrader.png`, servido em `/favicon.png`, sem precisar de login).
 
 **⭐ Favoritos na barra lateral**: digite qualquer ticker (ex.: `DOGE`) na caixa "Favoritos" e clique em "+" - o servidor resolve o símbolo (par USDT na Binance, decimais detectados pelo preço, mesmo mecanismo do `--assets` do terminal) e adiciona à lista. Clique num favorito pra trocar o gráfico pra ele.
 

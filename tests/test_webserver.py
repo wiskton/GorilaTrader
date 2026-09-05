@@ -209,3 +209,11 @@ def test_api_paper_trading_limits_closed_trades_to_last_30(monkeypatch):
 
     assert len(payload["closed"]) == 30
     assert payload["closed"][0]["entry_time"] == "2026-01-01T00:00:10"
+
+
+def test_favicon_serves_the_project_icon():
+    response = webserver.favicon()
+    assert response.media_type == "image/png"
+    assert response.path == webserver.FAVICON_PATH
+    import os
+    assert os.path.exists(webserver.FAVICON_PATH)
