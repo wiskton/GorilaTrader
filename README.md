@@ -125,21 +125,30 @@ Edite `config.json` (ignorado pelo git) para:
 
 Qualquer chave omitida usa o valor padrão - não é preciso repetir tudo, só o que quiser mudar.
 
-### Escolher as criptos na hora, sem editar `config.json`
+### Escolher criptos e timeframe na hora, sem editar `config.json`
 
-Pra trocar os ativos rapidinho (sem mexer em arquivo), o terminal também aceita:
+Pra trocar os ativos e o timeframe rapidinho (sem mexer em arquivo), o terminal também aceita:
 
 ```bash
-# Prompt interativo: ao abrir o terminal, ele pergunta o que acompanhar (Enter = usa o config.json)
+# Prompt interativo: SÓ na primeira execução, ele pergunta os ativos e o
+# timeframe (Enter usa os ativos do config.json e o timeframe 1h) e salva a
+# resposta em user_settings.json (ignorado pelo git). Nas próximas execuções
+# carrega direto, sem perguntar de novo.
 python3 gorilatrader.py
 
-# Ou direto por flag, pulando o prompt (funciona em qualquer modo, inclusive --serve/--backtest):
-python3 gorilatrader.py --assets BTC,ETH,DOGE
+# Ou direto por flag, pulando o prompt (funciona em qualquer modo, inclusive
+# --serve/--backtest) - sobrepõe só nessa execução, sem alterar o que está salvo:
+python3 gorilatrader.py --assets BTC,ETH,DOGE --timeframe 4h
+
+# Pra responder a pergunta de novo (trocar de ideia sobre ativos/timeframe padrão):
+python3 gorilatrader.py --reconfigure
 ```
 
-Um ticker que já está no `config.json`/nos padrões (ex.: `BTC`) reaproveita nome, ícone, exchange e casas decimais já curados. Um ticker novo (ex.: `DOGE`) assume automaticamente o par `TICKERUSDT` na Binance spot e detecta as casas decimais de exibição pelo preço atual (preços bem pequenos, tipo PEPE, ganham mais casas pra não arredondar tudo pra zero). Se o par não existir na Binance, o programa avisa e segue mesmo assim (aquele ativo aparece como "Erro de conexão" no dashboard). O prompt só aparece em terminal interativo - `--serve`, `--backtest`, `--paper-report`, `--reset-paper-trading`, `--test-telegram` e `--test-sound` nunca travam esperando input.
+Um ticker que já está no `config.json`/nos padrões (ex.: `BTC`) reaproveita nome, ícone, exchange e casas decimais já curados. Um ticker novo (ex.: `DOGE`) assume automaticamente o par `TICKERUSDT` na Binance spot e detecta as casas decimais de exibição pelo preço atual (preços bem pequenos, tipo PEPE, ganham mais casas pra não arredondar tudo pra zero). Se o par não existir na Binance, o programa avisa e segue mesmo assim (aquele ativo aparece como "Erro de conexão" no dashboard). O prompt só aparece em terminal interativo na primeira vez - `--serve`, `--backtest`, `--paper-report`, `--reset-paper-trading`, `--test-telegram` e `--test-sound` nunca travam esperando input.
 
-Não tem limite de quantidade - a tabela do terminal cresce automaticamente com o número de ativos (1 linha a mais por ativo) e se ajusta à altura do terminal disponível, então dá pra acompanhar dezenas ou centenas de criptos de uma vez (`--assets BTC,ETH,SOL,...`), não só as 5 do padrão. Num terminal pequeno demais pra caber tudo, o histórico de alertas cede espaço primeiro; a tabela de ativos só é comprimida como último recurso.
+**Timeframe (`--timeframe`)**: aceita `15m`, `1h` (padrão), `4h` ou `1d` - muda o candle principal usado por toda a matriz de confluência (EMAs, RSI, MACD, Bollinger, Donchian, OBV, Ichimoku) e ajusta junto o timeframe de confirmação multi-timeframe (MTF) pra um proporcionalmente maior: `15m`→confirma com `1h`, `1h`→confirma com `4h` (padrão original), `4h`→confirma com `1d`, `1d`→confirma com `1w`. Os rótulos na tela (`SINAL 1H`, `Tendência Maior (4H)` etc.) e as razões técnicas listadas acompanham o timeframe escolhido. Atenção: backtest (`--backtest`) e o modo papel (`max_holding_hours`) continuam assumindo candle de 1h internamente, independente do timeframe escolhido aqui.
+
+Não tem limite de quantidade de ativos - a tabela do terminal cresce automaticamente com o número de ativos (1 linha a mais por ativo) e se ajusta à altura do terminal disponível, então dá pra acompanhar dezenas ou centenas de criptos de uma vez (`--assets BTC,ETH,SOL,...`), não só as 5 do padrão. Num terminal pequeno demais pra caber tudo, o histórico de alertas cede espaço primeiro; a tabela de ativos só é comprimida como último recurso.
 
 ---
 

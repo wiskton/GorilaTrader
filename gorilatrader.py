@@ -145,7 +145,18 @@ _KRAKEN_INTERVAL_MAP = {
     "1d": 1440, "1w": 10080, "1M": 21600,
 }
 
+# Timeframes selecionáveis pra análise principal (pergunta interativa na
+# primeira execução, ou --timeframe). Cada um tem um timeframe de confirmação
+# MTF proporcionalmente maior (ver CONFIRMAÇÃO MULTI-TIMEFRAME em analyze_dataframe).
+AVAILABLE_TIMEFRAMES = ["15m", "1h", "4h", "1d"]
+DEFAULT_TIMEFRAME = "1h"
+MTF_TIMEFRAME_MAP = {"15m": "1h", "1h": "4h", "4h": "1d", "1d": "1w"}
+TIMEFRAME_LABELS = {"15m": "15M", "1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W"}
+TIMEFRAME_FULL_LABELS = {"15m": "15 Minutos", "1h": "1 Hora", "4h": "4 Horas", "1d": "1 Dia", "1w": "1 Semana"}
+TIMEFRAME_MINUTES = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080}
+
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
+USER_SETTINGS_PATH = os.path.join(DATA_DIR, "user_settings.json")
 
 
 DEFAULT_PAPER_TRADING_CFG = {
@@ -212,6 +223,9 @@ def resolve_web_password(web_auth_cfg: dict) -> Optional[str]:
 
 ASSETS, WEIGHTS, TELEGRAM_CFG, PAPER_TRADING_CFG, WEB_AUTH_CFG = load_config()
 
+# Timeframe do gráfico principal em uso nesta execução - ver load_or_prompt_settings.
+TIMEFRAME = DEFAULT_TIMEFRAME
+
 # ---------------------------------------------------------------------------
 # Seleção de ativos digitada pela pessoa (--assets ou prompt interativo no
 # terminal), sem precisar editar config.json.
@@ -267,6 +281,84 @@ def resolve_assets_from_tickers(raw: str, console: Optional[Console] = None) -> 
                 "decimals": decimals,
             }
     return resolved
+
+
+def load_user_settings(path: str = USER_SETTINGS_PATH) -> Optional[dict]:
+    """Lê os ativos/timeframe escolhidos na última vez que a pergunta
+    interativa foi respondida (ver load_or_prompt_settings). None se nunca
+    foi respondida ainda ou o arquivo está corrompido (nesse caso a pergunta
+    volta a aparecer, como se fosse a primeira execução)."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        logger.warning("Falha ao ler %s: %s. Vou perguntar de novo.", path, exc)
+    return None
+
+
+def save_user_settings(assets_raw: str, timeframe: str, path: str = USER_SETTINGS_PATH) -> None:
+    try:
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump({"assets": assets_raw, "timeframe": timeframe}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    except Exception:
+        logger.warning("Falha ao salvar %s", path, exc_info=True)
+
+
+def load_or_prompt_settings(headless_mode: bool, console: Optional[Console] = None) -> None:
+    """Carrega os ativos e o timeframe salvos em USER_SETTINGS_PATH (ajusta
+    os globais ASSETS/TIMEFRAME). Se ainda não existe nada salvo e a sessão é
+    interativa, pergunta uma única vez (ativos + timeframe) e salva a
+    resposta - nas próximas execuções não pergunta mais (use --reconfigure
+    pra apagar a preferência salva e responder de novo)."""
+    global ASSETS, TIMEFRAME
+
+    saved = load_user_settings()
+    if saved is not None:
+        raw_assets = saved.get("assets")
+        if raw_assets:
+            ASSETS = resolve_assets_from_tickers(raw_assets, console=console)
+        tf = saved.get("timeframe")
+        if tf in AVAILABLE_TIMEFRAMES:
+            TIMEFRAME = tf
+        return
+
+    if headless_mode or not sys.stdin.isatty():
+        return
+
+    console = console or Console()
+    raw = Prompt.ask(
+        "[bold cyan]🦍 Quais criptos você quer acompanhar?[/bold cyan] "
+        "[dim](ex.: BTC,ETH,DOGE — Enter para usar os ativos configurados)[/dim]",
+        default="",
+        console=console,
+    )
+    if raw.strip():
+        ASSETS = resolve_assets_from_tickers(raw, console=console)
+        assets_to_save = raw.strip()
+    else:
+        assets_to_save = ",".join(ASSETS.keys())
+
+    tf_choice = Prompt.ask(
+        "[bold cyan]🕒 Qual timeframe você quer ficar analisando?[/bold cyan] "
+        f"[dim]({' / '.join(AVAILABLE_TIMEFRAMES)} — Enter para {DEFAULT_TIMEFRAME})[/dim]",
+        default=DEFAULT_TIMEFRAME,
+        choices=AVAILABLE_TIMEFRAMES,
+        show_choices=False,
+        console=console,
+    )
+    TIMEFRAME = tf_choice if tf_choice in AVAILABLE_TIMEFRAMES else DEFAULT_TIMEFRAME
+
+    save_user_settings(assets_to_save, TIMEFRAME, USER_SETTINGS_PATH)
+    console.print(
+        f"[dim]✅ Preferências salvas ({os.path.basename(USER_SETTINGS_PATH)}) - "
+        "não vou perguntar de novo. Use --reconfigure pra mudar depois.[/dim]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -652,11 +744,12 @@ class CryptoAnalyzer:
 
     @classmethod
     def analyze_asset(cls, key: str, config: dict, weights: Optional[dict] = None) -> Optional[MarketData]:
-        df = cls.fetch_klines(config["symbol"], config["exchange"], interval="1h", limit=250)
+        df = cls.fetch_klines(config["symbol"], config["exchange"], interval=TIMEFRAME, limit=250)
         if df is None or len(df) < 50:
             logger.warning("Dados insuficientes para %s (%s candles)", key, 0 if df is None else len(df))
             return None
-        mtf_df = cls.fetch_mtf_klines(config["symbol"], config["exchange"], interval="4h", limit=120)
+        mtf_interval = MTF_TIMEFRAME_MAP.get(TIMEFRAME, "4h")
+        mtf_df = cls.fetch_mtf_klines(config["symbol"], config["exchange"], interval=mtf_interval, limit=120)
         return cls.analyze_dataframe(key, config, df, weights, mtf_df=mtf_df)
 
     @classmethod
@@ -738,7 +831,8 @@ class CryptoAnalyzer:
         open_1h = float(df["open"].iloc[-1])
         change_1h = ((price - open_1h) / open_1h) * 100.0
 
-        idx_24h = max(0, len(c) - 25)
+        candles_per_24h = max(1, round(1440 / TIMEFRAME_MINUTES.get(TIMEFRAME, 60)))
+        idx_24h = max(0, len(c) - candles_per_24h - 1)
         price_24h_ago = float(c.iloc[idx_24h])
         change_24h = ((price - price_24h_ago) / price_24h_ago) * 100.0
 
@@ -948,15 +1042,17 @@ class CryptoAnalyzer:
                 score -= w["ichimoku_tk_cross"]
                 reasons.append("Cruzamento baixista Tenkan/Kijun (Ichimoku)")
 
-        # --- I) CONFIRMAÇÃO MULTI-TIMEFRAME (4H) ---
+        # --- I) CONFIRMAÇÃO MULTI-TIMEFRAME ---
         if mtf_bias is not None:
             local_bias = "ALTA" if price > e21 else "BAIXA"
+            mtf_label = MTF_TIMEFRAME_MAP.get(TIMEFRAME, "4h")
+            main_label = TIMEFRAME
             if local_bias == mtf_bias:
                 score += w["mtf_confirmation"]
-                reasons.append(f"Tendência de 4h ({mtf_bias.lower()}) confirma o viés de 1h")
+                reasons.append(f"Tendência de {mtf_label} ({mtf_bias.lower()}) confirma o viés de {main_label}")
             else:
                 score -= w["mtf_confirmation"]
-                reasons.append(f"Tendência de 4h ({mtf_bias.lower()}) diverge do 1h - contra a tendência maior")
+                reasons.append(f"Tendência de {mtf_label} ({mtf_bias.lower()}) diverge do {main_label} - contra a tendência maior")
 
         # Normaliza pontuação
         score = max(-100, min(100, score))
@@ -1174,15 +1270,16 @@ class GorilaTraderTerminal:
         sound_status = "[bold green]🔊 APITO ATIVO[/bold green]" if self.sound.enabled else "[yellow]🔇 MUDO[/yellow]"
         telegram_status = "[bold green]📨 TELEGRAM ATIVO[/bold green]" if self.telegram.enabled else "[dim]📨 Telegram off[/dim]"
         time_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        tf_label = TIMEFRAME_LABELS.get(TIMEFRAME, "1H")
         header_text = Text.from_markup(
-            f" [bold cyan]GORILATRADER[/bold cyan] · Análise 1h Cripto em Tempo Real · {sound_status} · {telegram_status} · 🕒 {time_str}"
+            f" [bold cyan]GORILATRADER[/bold cyan] · Análise {tf_label} Cripto em Tempo Real · {sound_status} · {telegram_status} · 🕒 {time_str}"
         )
         layout["header"].update(Panel(header_text, style="cyan", box=box.ROUNDED))
 
         table = Table(box=box.ROUNDED, expand=True, header_style="bold bright_white on grey23")
         table.add_column("Ativo", justify="left", style="bold", width=16)
         table.add_column("Preço Atual", justify="right", width=15)
-        table.add_column("1h %", justify="right", width=9)
+        table.add_column(f"{tf_label} %", justify="right", width=9)
         table.add_column("24h %", justify="right", width=9)
         table.add_column("RSI (14)", justify="right", width=10)
         table.add_column("MACD Hist", justify="right", width=11)
@@ -1190,7 +1287,7 @@ class GorilaTraderTerminal:
         table.add_column("Ichimoku", justify="center", width=17)
         table.add_column("Canal Donch.", justify="center", width=12)
         table.add_column("Bollinger", justify="center", width=15)
-        table.add_column("SINAL 1H", justify="center", width=17)
+        table.add_column(f"SINAL {tf_label}", justify="center", width=17)
         table.add_column("Score", justify="center", width=8)
         table.add_column("Stop Loss", justify="right", width=14)
         table.add_column("Take Profit 1", justify="right", width=14)
@@ -1307,7 +1404,8 @@ class GorilaTraderTerminal:
                 f"[bold green]{tp2_str}[/bold green]",
             )
 
-        layout["main"].update(Panel(table, title="[bold]📊 Monitor Gráfico de 1 Hora (Corte Técnico)[/bold]", border_style="blue"))
+        tf_full_label = TIMEFRAME_FULL_LABELS.get(TIMEFRAME, "1 Hora")
+        layout["main"].update(Panel(table, title=f"[bold]📊 Monitor Gráfico de {tf_full_label} (Corte Técnico)[/bold]", border_style="blue"))
 
         alert_table = Table(box=box.SIMPLE, expand=True)
         alert_table.add_column("Horário", width=12, style="dim")
@@ -1494,9 +1592,11 @@ class GorilaTraderTerminal:
 
     def run_once(self):
         """Executa uma análise detalhada imediata e imprime no terminal."""
+        tf_label = TIMEFRAME_LABELS.get(TIMEFRAME, "1H")
+        tf_full_label = TIMEFRAME_FULL_LABELS.get(TIMEFRAME, "1 Hora")
         self.console.print("\n[bold cyan]═══════════════════════════════════════════════════════════════════════════════[/bold cyan]")
-        self.console.print(" [bold white on blue] GORILATRADER · RELATÓRIO DO GRÁFICO DE 1 HORA [/bold white on blue]")
-        self.console.print(f" [dim]Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} · Timeframe: 1H[/dim]")
+        self.console.print(f" [bold white on blue] GORILATRADER · RELATÓRIO DO GRÁFICO DE {tf_full_label.upper()} [/bold white on blue]")
+        self.console.print(f" [dim]Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} · Timeframe: {tf_label}[/dim]")
         self.console.print("[bold cyan]═══════════════════════════════════════════════════════════════════════════════[/bold cyan]\n")
 
         results = self.fetch_all()
@@ -1527,10 +1627,10 @@ class GorilaTraderTerminal:
             table.add_column("Valor")
 
             table.add_row("Ativo", f"{config['icon']} [bold]{key}[/bold] - {config['name']}")
-            table.add_row("Cotação Atual", f"[bold]{p_str}[/bold] (1h: {item.change_1h:+.2f}% | 24h: {item.change_24h:+.2f}%)")
+            table.add_row("Cotação Atual", f"[bold]{p_str}[/bold] ({tf_label}: {item.change_1h:+.2f}% | 24h: {item.change_24h:+.2f}%)")
             table.add_row("Diagnóstico Quant", f"{badge}  Score Confluência: [bold]{item.score:+d}[/bold]")
             table.add_row("Recomendação", recom)
-            table.add_row("Médias Móveis (1h)", f"EMA9: {self.format_price(item.ema9, dec)} | EMA21: {self.format_price(item.ema21, dec)} | EMA50: {self.format_price(item.ema50, dec)}")
+            table.add_row(f"Médias Móveis ({tf_label})", f"EMA9: {self.format_price(item.ema9, dec)} | EMA21: {self.format_price(item.ema21, dec)} | EMA50: {self.format_price(item.ema50, dec)}")
             table.add_row("Indicadores de Impulso", f"RSI(14): [bold]{item.rsi:.1f}[/bold] | MACD Hist: [bold]{item.macd_hist:.4f}[/bold] | ATR(14): {self.format_price(item.atr, dec)}")
 
             table.add_row(
@@ -1557,7 +1657,8 @@ class GorilaTraderTerminal:
             )
 
             mtf_str = f"[bold]{item.mtf_bias}[/bold]" if item.mtf_bias else "[dim]indisponível[/dim]"
-            table.add_row("Tendência Maior (4h)", f"Viés do candle de 4h: {mtf_str}")
+            mtf_interval_label = TIMEFRAME_LABELS.get(MTF_TIMEFRAME_MAP.get(TIMEFRAME, "4h"), "4H")
+            table.add_row(f"Tendência Maior ({mtf_interval_label})", f"Viés do candle de {mtf_interval_label}: {mtf_str}")
 
             table.add_row("Gerenciamento de Risco", f"Stop Loss: [bold red]{sl_str}[/bold red] | Take Profit 1: [bold green]{tp1_str}[/bold green] | Take Profit 2: [bold green]{tp2_str}[/bold green]")
 
@@ -1572,7 +1673,7 @@ class GorilaTraderTerminal:
         self.console.clear()
         data_map: Dict[str, MarketData] = {}
 
-        with self.console.status("[bold green]Conectando às exchanges e analisando gráficos de 1h...[/bold green]"):
+        with self.console.status(f"[bold green]Conectando às exchanges e analisando gráficos de {TIMEFRAME_LABELS.get(TIMEFRAME, '1H')}...[/bold green]"):
             data_map = self.refresh(data_map)
 
         countdown = self.interval
@@ -1683,29 +1784,43 @@ def main():
         "--assets",
         metavar="TICKERS",
         help="Criptos a acompanhar nesta execução, separadas por vírgula (ex.: BTC,ETH,DOGE) - "
-        "sobrepõe os ativos do config.json sem editar o arquivo. Sem esta flag, o terminal "
-        "pergunta interativamente quais criptos acompanhar (Enter usa os ativos configurados).",
+        "sobrepõe os ativos salvos/configurados sem editar arquivo nem afetar o que fica salvo. "
+        "Sem esta flag, a primeira execução pergunta interativamente quais criptos e qual "
+        "timeframe acompanhar e salva a resposta - as próximas execuções carregam direto, sem "
+        "perguntar de novo (veja --reconfigure).",
+    )
+    parser.add_argument(
+        "--timeframe",
+        choices=AVAILABLE_TIMEFRAMES,
+        help="Timeframe do gráfico principal a analisar nesta execução - sobrepõe o timeframe "
+        "salvo/configurado sem editar arquivo nem afetar o que fica salvo.",
+    )
+    parser.add_argument(
+        "--reconfigure",
+        action="store_true",
+        help="Apaga os ativos/timeframe salvos e volta a perguntar interativamente na próxima execução.",
     )
 
     args = parser.parse_args()
 
-    global ASSETS
+    global ASSETS, TIMEFRAME
     headless_mode = bool(
         args.backtest or args.serve or args.paper_report or args.reset_paper_trading
         or args.test_telegram or args.test_sound
     )
+
+    if args.reconfigure and os.path.exists(USER_SETTINGS_PATH):
+        os.remove(USER_SETTINGS_PATH)
+
+    # Carrega ativos/timeframe salvos como base (não pergunta se --assets/--timeframe
+    # já foram passados nesta execução - eles têm prioridade e não sobrescrevem o
+    # arquivo salvo, ver overrides abaixo).
+    load_or_prompt_settings(headless_mode=headless_mode or bool(args.assets or args.timeframe))
+
     if args.assets:
         ASSETS = resolve_assets_from_tickers(args.assets, console=Console())
-    elif not headless_mode and sys.stdin.isatty():
-        console = Console()
-        raw = Prompt.ask(
-            "[bold cyan]🦍 Quais criptos você quer acompanhar?[/bold cyan] "
-            "[dim](ex.: BTC,ETH,DOGE — Enter para usar os ativos configurados)[/dim]",
-            default="",
-            console=console,
-        )
-        if raw.strip():
-            ASSETS = resolve_assets_from_tickers(raw, console=console)
+    if args.timeframe:
+        TIMEFRAME = args.timeframe
 
     if args.backtest:
         console = Console()

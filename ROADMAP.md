@@ -136,7 +136,7 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 
 ## ✅ v2.4 — Seletor de Timeframe e Novos Indicadores no Gráfico Web (entregue)
 
-- [x] **Seletor de timeframe** no gráfico web: botões `3m`/`5m`/`15m`/`1h`/`4h`/`1D`/`1S`/`1M` acima do gráfico - só muda a visualização (candles/indicadores); o sinal/score da barra lateral continua sempre no gráfico de 1h, que é a identidade do projeto. `/api/chart/{key}` e `/ws/{key}` aceitam `interval` (400 se não for um dos 8 válidos)
+- [x] **Seletor de timeframe** no gráfico web: botões `3m`/`5m`/`15m`/`1h`/`4h`/`1D`/`1S`/`1M` acima do gráfico - só muda a visualização (candles/indicadores), independente do timeframe principal da análise. `/api/chart/{key}` e `/ws/{key}` aceitam `interval` (400 se não for um dos 8 válidos). *(Nota: na época desta versão o sinal/score da barra lateral era sempre calculado em cima do gráfico de 1h fixo - isso mudou na v2.5, que tornou o timeframe principal da análise configurável.)*
 - [x] 🐛 Corrigido: o gráfico chamava `fitContent()` (reenquadra e reseta zoom/posição) a cada push do WebSocket, a cada ~20s - qualquer zoom ou pan que a pessoa tivesse feito era descartado sozinho pouco depois. Agora só reenquadra na primeira carga de um ativo/timeframe; atualizações periódicas seguintes só atualizam os dados, mantendo o que a pessoa deixou na tela
 - [x] Nova **EMA 14** no gráfico (fora da matriz de confluência - é só mais um overlay visual, não um fator de pontuação novo)
 - [x] Cores das EMAs revisadas: EMA9 azul claro, EMA14 verde claro, EMA21 amarelo, EMA50 laranja, EMA200 branco. Ichimoku: Tenkan (primeira média) verde, Kijun (segunda média) amarelo
@@ -147,6 +147,17 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] Bandas de Bollinger passaram a mostrar também a **média do meio** (SMA 20) - o backend já calculava (`bb_middle`), só faltava o frontend desenhar a linha
 - [x] **Favicon** no dashboard web: reaproveita o ícone pixel art do atalho de desktop (`gorilatrader.png`), servido em `/favicon.png` sem exigir login (igual a página de `/login`) - aparece na aba do navegador tanto no dashboard quanto na tela de login
 - [x] 1 novo teste (favicon serve o arquivo certo com o content-type certo) - 170 testes no total
+
+## ✅ v2.5 — Timeframe Principal Configurável e Preferências Salvas (entregue)
+
+- [x] **Pergunta uma única vez, não mais a cada execução**: o prompt interativo de ativos (que antes reaparecia em toda execução no terminal) agora só aparece na primeira vez - a resposta é salva em `user_settings.json` (ignorado pelo git, ao lado de `config.json`) e as próximas execuções carregam direto, sem perguntar de novo. `--reconfigure` apaga o que está salvo e volta a perguntar.
+- [x] **Timeframe do gráfico principal virou pergunta real** (não só cosmética): a mesma pergunta única agora também cobre qual timeframe acompanhar - `15m`, `1h` (padrão, comportamento anterior), `4h` ou `1d`. A escolha muda de verdade o candle buscado por toda a matriz de confluência (EMAs, RSI, MACD, Bollinger, Donchian, OBV, Ichimoku), tanto no terminal quanto no dashboard web (`--serve`, incluindo o sinal/score da barra lateral e o monitor de alertas em segundo plano)
+- [x] **Confirmação multi-timeframe (MTF) proporcional**: o timeframe de confirmação deixou de ser sempre `4h` fixo e passou a acompanhar o timeframe principal escolhido - `15m`→confirma com `1h`, `1h`→confirma com `4h` (igual antes), `4h`→confirma com `1d`, `1d`→confirma com `1w`
+- [x] Nova flag `--timeframe` (sobrepõe só na execução atual, sem alterar o que está salvo) e `--reconfigure` (apaga `user_settings.json`)
+- [x] Rótulos da interface (coluna `1h %`/`SINAL 1H` da tabela, título do painel, "Timeframe: 1H" do relatório detalhado, "Tendência Maior (4h)", razões técnicas como "Tendência de 4h confirma o viés de 1h") passaram a ser dinâmicos, refletindo o timeframe escolhido em vez de texto fixo
+- [x] Cálculo da variação de 24h (`change_24h`) generalizado pra qualquer timeframe (antes assumia sempre 24 candles de 1h = 24h; agora calcula quantos candles do timeframe escolhido cabem em 24h)
+- [x] ⚠️ Limitação conhecida e documentada no README: `--backtest` e o `max_holding_hours` do modo papel continuam assumindo candle de 1h internamente, independente do timeframe escolhido aqui - não foram adaptados nesta versão
+- [x] Seletor de timeframe do gráfico web (botões acima do candle, v2.4) continua sendo só uma lupa visual independente, sem relação com este timeframe principal da análise
 
 ---
 
