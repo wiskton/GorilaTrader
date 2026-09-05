@@ -115,6 +115,18 @@ def test_fetch_klines_okx_maps_4h_interval():
     assert "bar=4H" in mock_get.call_args[0][0]
 
 
+def test_fetch_klines_okx_maps_new_timeframes():
+    ok_response = MagicMock(status_code=200)
+    ok_response.raise_for_status.return_value = None
+    ok_response.json.return_value = {"code": "0", "data": [OKX_ROW] * 60}
+
+    expected = {"3m": "3m", "5m": "5m", "15m": "15m", "1d": "1D", "1w": "1W", "1M": "1M"}
+    for interval, bar in expected.items():
+        with patch("gorilatrader.requests.get", return_value=ok_response) as mock_get:
+            CryptoAnalyzer.fetch_klines("BTC-USDT", "okx", interval=interval, limit=60)
+        assert f"bar={bar}" in mock_get.call_args[0][0]
+
+
 def test_fetch_klines_returns_none_when_okx_has_no_data():
     empty_response = MagicMock(status_code=200)
     empty_response.raise_for_status.return_value = None
@@ -158,6 +170,20 @@ def test_fetch_klines_kraken_maps_4h_interval():
         CryptoAnalyzer.fetch_klines("XBTUSDT", "kraken", interval="4h", limit=60)
 
     assert "interval=240" in mock_get.call_args[0][0]
+
+
+def test_fetch_klines_kraken_maps_new_timeframes():
+    ok_response = MagicMock(status_code=200)
+    ok_response.raise_for_status.return_value = None
+    ok_response.json.return_value = {"error": [], "result": {"XBTUSDT": [KRAKEN_ROW] * 60, "last": 1700003600}}
+
+    # Kraken não tem candle nativo de 3min nem de 1 mês - cai pro mais
+    # próximo que ela suporta (5min e 15 dias).
+    expected = {"5m": 5, "15m": 15, "1d": 1440, "1w": 10080, "3m": 5, "1M": 21600}
+    for interval, minutes in expected.items():
+        with patch("gorilatrader.requests.get", return_value=ok_response) as mock_get:
+            CryptoAnalyzer.fetch_klines("XBTUSDT", "kraken", interval=interval, limit=60)
+        assert f"interval={minutes}" in mock_get.call_args[0][0]
 
 
 def test_fetch_klines_returns_none_when_kraken_returns_error():

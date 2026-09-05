@@ -132,10 +132,18 @@ API_URLS = {
     "kraken": "https://api.kraken.com/0/public/OHLC",
 }
 
-# Formato do intervalo varia por exchange: Binance/Bybit usam "1h"/"4h" direto,
-# OKX usa "1H"/"4H" e Kraken usa minutos como inteiro.
-_OKX_INTERVAL_MAP = {"1h": "1H", "4h": "4H"}
-_KRAKEN_INTERVAL_MAP = {"1h": 60, "4h": 240}
+# Formato do intervalo varia por exchange: Binance/Bybit usam "3m"/"5m"/.../"1M"
+# direto, OKX usa maiúsculas pra hora/dia/semana/mês e Kraken usa minutos como
+# inteiro (e não tem candle nativo de 3min nem de 1 mês - cai pro mais próximo
+# que ela tem: 5min e 15 dias respectivamente).
+_OKX_INTERVAL_MAP = {
+    "3m": "3m", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H",
+    "1d": "1D", "1w": "1W", "1M": "1M",
+}
+_KRAKEN_INTERVAL_MAP = {
+    "3m": 5, "5m": 5, "15m": 15, "1h": 60, "4h": 240,
+    "1d": 1440, "1w": 10080, "1M": 21600,
+}
 
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 

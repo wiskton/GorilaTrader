@@ -112,6 +112,46 @@ def test_api_chart_uses_resolved_favorite_not_in_assets():
     assert len(payload["candles"]) == 60
 
 
+def test_api_chart_includes_ema14_and_volume_ma21():
+    row = [1700000000000, "100.0", "101.0", "99.0", "100.5", "1000.0",
+           1700003600000, "0.0", 10, "0.0", "0.0", "0"]
+    resp = MagicMock(status_code=200)
+    resp.raise_for_status.return_value = None
+    resp.json.return_value = [row] * 60
+
+    with patch("gorilatrader.requests.get", return_value=resp):
+        response = webserver.api_chart("btc", _fake_request())
+
+    import json
+    payload = json.loads(response.body)
+    assert "ema14" in payload
+    assert "volume_ma21" in payload
+    assert len(payload["ema14"]) == 60
+    assert payload["interval"] == "1h"
+
+
+def test_api_chart_rejects_invalid_interval():
+    with pytest.raises(HTTPException) as exc_info:
+        webserver.api_chart("btc", _fake_request(), interval="2h")
+    assert exc_info.value.status_code == 400
+
+
+def test_api_chart_uses_requested_interval():
+    row = [1700000000000, "100.0", "101.0", "99.0", "100.5", "1000.0",
+           1700003600000, "0.0", 10, "0.0", "0.0", "0"]
+    resp = MagicMock(status_code=200)
+    resp.raise_for_status.return_value = None
+    resp.json.return_value = [row] * 60
+
+    with patch("gorilatrader.requests.get", return_value=resp) as mock_get:
+        response = webserver.api_chart("btc", _fake_request(), interval="4h")
+
+    import json
+    payload = json.loads(response.body)
+    assert payload["interval"] == "4h"
+    assert "interval=4h" in mock_get.call_args[0][0]
+
+
 def test_api_chart_404_for_unresolvable_ticker():
     with patch("gorilatrader.requests.get", return_value=_empty_response()):
         with pytest.raises(HTTPException) as exc_info:

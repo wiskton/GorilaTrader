@@ -107,6 +107,7 @@
 
 <main>
   <div class="chartcol">
+    <div class="tabs" id="timeframeToolbar"></div>
     <div class="toolbar" id="overlayToolbar"></div>
     <div id="chart"></div>
     <div class="toolbar">
@@ -166,10 +167,11 @@
 
 <script>
 const OVERLAYS = [
-  { key: 'ema9',   label: 'EMA 9',   color: '#ffd166', kind: 'line', dashed: false },
-  { key: 'ema21',  label: 'EMA 21',  color: '#06d6a0', kind: 'line', dashed: false },
-  { key: 'ema50',  label: 'EMA 50',  color: '#4cc9f0', kind: 'line', dashed: false },
-  { key: 'ema200', label: 'EMA 200', color: '#f72585', kind: 'line', dashed: false },
+  { key: 'ema9',   label: 'EMA 9',   color: '#5eb8ff', kind: 'line', dashed: false }, // azul claro
+  { key: 'ema14',  label: 'EMA 14',  color: '#6ee7a0', kind: 'line', dashed: false }, // verde claro
+  { key: 'ema21',  label: 'EMA 21',  color: '#ffe066', kind: 'line', dashed: false }, // amarelo
+  { key: 'ema50',  label: 'EMA 50',  color: '#ffa94d', kind: 'line', dashed: false }, // laranja
+  { key: 'ema200', label: 'EMA 200', color: '#ffffff', kind: 'line', dashed: false }, // branco
   { key: 'bb',       label: 'Bollinger (20,2)', color: '#c9d1e0', kind: 'band', dashed: true,
     fields: ['bb_upper', 'bb_lower'] },
   { key: 'donchian', label: 'Canal Donchian(20)', color: '#4cc9f0', kind: 'band', dashed: true,
@@ -177,15 +179,23 @@ const OVERLAYS = [
   { key: 'ichimoku', label: 'Ichimoku Cloud', color: '#8338ec', kind: 'ichimoku', dashed: false,
     fields: ['ichimoku_tenkan', 'ichimoku_kijun', 'ichimoku_senkou_a', 'ichimoku_senkou_b'] },
 ];
-const DEFAULT_ON = { ema9: false, ema21: true, ema50: true, ema200: true, bb: false, donchian: false, ichimoku: true };
+const DEFAULT_ON = { ema9: false, ema14: false, ema21: true, ema50: true, ema200: true, bb: false, donchian: false, ichimoku: true };
+
+const TIMEFRAMES = [
+  { key: '3m', label: '3m' }, { key: '5m', label: '5m' }, { key: '15m', label: '15m' },
+  { key: '1h', label: '1h' }, { key: '4h', label: '4h' }, { key: '1d', label: '1D' },
+  { key: '1w', label: '1S' }, { key: '1M', label: '1M' },
+];
 
 let assets = {};
 let currentKey = null;
+let currentInterval = '1h';
 let overlayState = { ...DEFAULT_ON };
 let oscMode = 'rsi';
 let lastChartData = null;
+let shouldFitOnNextChart = true; // só reenquadra o zoom ao trocar de ativo/timeframe, não a cada push do WS
 
-let mainChart, candleSeries, volumeSeries;
+let mainChart, candleSeries, volumeSeries, volumeMaSeries;
 let overlaySeries = {}; // key -> series or {a, b} for bands/ichimoku
 let bandFillPrimitives = {}; // key -> BandFillPrimitive (sombreamento entre as bandas)
 let oscChart, oscSeriesRefs = {};
@@ -291,6 +301,9 @@ function buildCharts() {
     priceFormat: { type: 'volume' },
     priceScaleId: 'vol',
   });
+  volumeMaSeries = mainChart.addLineSeries({
+    color: '#ffe066', lineWidth: 1, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false,
+  });
   mainChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
 
   for (const ov of OVERLAYS) {
@@ -305,8 +318,8 @@ function buildCharts() {
       };
     } else if (ov.kind === 'ichimoku') {
       overlaySeries[ov.key] = {
-        tenkan: mainChart.addLineSeries({ color: '#ffb703', lineWidth: 1, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
-        kijun: mainChart.addLineSeries({ color: '#8338ec', lineWidth: 1, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
+        tenkan: mainChart.addLineSeries({ color: '#4ade80', lineWidth: 1, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }), // primeira média (Tenkan) - verde
+        kijun: mainChart.addLineSeries({ color: '#ffe066', lineWidth: 1, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }), // segunda média (Kijun) - amarelo
         senkouA: mainChart.addLineSeries({ color: 'rgba(0,214,122,0.7)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
         senkouB: mainChart.addLineSeries({ color: 'rgba(255,90,90,0.7)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, visible: !!overlayState[ov.key], lastValueVisible: false, priceLineVisible: false }),
       };
@@ -392,7 +405,29 @@ function switchAsset(key) {
   buildTabs();
   buildFavorites();
   lastChartData = null;
+  shouldFitOnNextChart = true;
   connectWebSocket(key);
+}
+
+function buildTimeframeToolbar() {
+  const el = document.getElementById('timeframeToolbar');
+  el.innerHTML = '';
+  for (const tf of TIMEFRAMES) {
+    const btn = document.createElement('div');
+    btn.className = 'tab' + (tf.key === currentInterval ? ' active' : '');
+    btn.textContent = tf.label;
+    btn.addEventListener('click', () => setTimeframe(tf.key));
+    el.appendChild(btn);
+  }
+}
+
+function setTimeframe(interval) {
+  if (interval === currentInterval) return;
+  currentInterval = interval;
+  buildTimeframeToolbar();
+  lastChartData = null;
+  shouldFitOnNextChart = true;
+  connectWebSocket(currentKey);
 }
 
 function applyChart(data) {
@@ -400,8 +435,10 @@ function applyChart(data) {
 
   candleSeries.setData(data.candles);
   volumeSeries.setData(data.volume);
+  volumeMaSeries.setData(data.volume_ma21);
 
   overlaySeries.ema9.setData(data.ema9);
+  overlaySeries.ema14.setData(data.ema14);
   overlaySeries.ema21.setData(data.ema21);
   overlaySeries.ema50.setData(data.ema50);
   overlaySeries.ema200.setData(data.ema200);
@@ -419,7 +456,14 @@ function applyChart(data) {
 
   updateOscillator(data);
   for (const p of Object.values(bandFillPrimitives)) p.redraw();
-  mainChart.timeScale().fitContent();
+
+  // só reenquadra (e "reseta o zoom") na primeira carga de um ativo/timeframe
+  // novo - nas atualizações periódicas seguintes (mesmo WS, só dado novo)
+  // mantém a posição/zoom que a pessoa deixou.
+  if (shouldFitOnNextChart) {
+    mainChart.timeScale().fitContent();
+    shouldFitOnNextChart = false;
+  }
 }
 
 function clearOscSeries() {
@@ -515,7 +559,7 @@ function connectWebSocket(key) {
 
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   setStatus('conectando...');
-  ws = new WebSocket(`${scheme}://${location.host}/ws/${key}`);
+  ws = new WebSocket(`${scheme}://${location.host}/ws/${key}?interval=${encodeURIComponent(currentInterval)}`);
 
   ws.onmessage = (event) => {
     if (myGeneration !== wsGeneration) return; // conexão obsoleta (trocou de ativo)
@@ -735,6 +779,7 @@ async function init() {
   currentKey = Object.keys(assets)[0];
 
   buildTabs();
+  buildTimeframeToolbar();
   buildOverlayToolbar();
   buildCharts();
   setupFavoritesUI();

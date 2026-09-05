@@ -134,6 +134,17 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 - [x] ⚠️ Limitação conhecida e documentada: desfavoritar um ativo com uma posição do modo papel aberta deixa essa posição parada (sem novas atualizações) até ele ser favoritado de novo - não fecha sozinha
 - [x] 10 novos testes (favoritar registra em ASSETS e persiste em disco, ticker inválido não muda nenhum estado, desfavoritar remove só o que foi favoritado - nunca um ativo real de config.json, `_load_web_favorites` restaura do disco no início e tolera arquivo ausente/corrompido/com ticker que não resolve mais) - 164 testes no total
 
+## ✅ v2.4 — Seletor de Timeframe e Novos Indicadores no Gráfico Web (entregue)
+
+- [x] **Seletor de timeframe** no gráfico web: botões `3m`/`5m`/`15m`/`1h`/`4h`/`1D`/`1S`/`1M` acima do gráfico - só muda a visualização (candles/indicadores); o sinal/score da barra lateral continua sempre no gráfico de 1h, que é a identidade do projeto. `/api/chart/{key}` e `/ws/{key}` aceitam `interval` (400 se não for um dos 8 válidos)
+- [x] 🐛 Corrigido: o gráfico chamava `fitContent()` (reenquadra e reseta zoom/posição) a cada push do WebSocket, a cada ~20s - qualquer zoom ou pan que a pessoa tivesse feito era descartado sozinho pouco depois. Agora só reenquadra na primeira carga de um ativo/timeframe; atualizações periódicas seguintes só atualizam os dados, mantendo o que a pessoa deixou na tela
+- [x] Nova **EMA 14** no gráfico (fora da matriz de confluência - é só mais um overlay visual, não um fator de pontuação novo)
+- [x] Cores das EMAs revisadas: EMA9 azul claro, EMA14 verde claro, EMA21 amarelo, EMA50 laranja, EMA200 branco. Ichimoku: Tenkan (primeira média) verde, Kijun (segunda média) amarelo
+- [x] **Volume com média móvel de 21 períodos** (linha amarela sobreposta às barras de volume)
+- [x] MACD e Bandas de Bollinger já existiam (MACD no dropdown de osciladores, Bollinger nos overlays) - conferidos e mantidos
+- [x] `_OKX_INTERVAL_MAP`/`_KRAKEN_INTERVAL_MAP` expandidos pra cobrir os 8 novos timeframes (Kraken não tem candle nativo de 3min nem de 1 mês - cai pro mais próximo que ela suporta: 5min e 15 dias)
+- [x] 5 novos testes (payload inclui EMA14/volume_ma21, `interval` inválido rejeitado com 400, intervalo customizado repassado de verdade pra exchange, mapeamento dos novos timeframes pra OKX e pra Kraken) - 169 testes no total
+
 ---
 
 ## 🚧 Próximos Passos

@@ -41,8 +41,18 @@ from gorilatrader import (
     resolve_web_password,
 )
 
-BAR_SECONDS = 3600  # candles de 1h
 WS_INTERVAL_SECONDS = 20  # cadência de push do WebSocket, mesma ordem do terminal
+
+# Timeframes que o gráfico web aceita (seletor no topo do gráfico) - só
+# afetam a VISUALIZAÇÃO; o sinal/score da barra lateral continua sendo
+# calculado sempre no gráfico de 1h (é a identidade do projeto). Segundos por
+# candle de cada um, usados só pra projetar a Nuvem de Ichimoku 26 períodos
+# à frente no eixo do tempo.
+VALID_INTERVALS = ["3m", "5m", "15m", "1h", "4h", "1d", "1w", "1M"]
+INTERVAL_SECONDS = {
+    "3m": 180, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400,
+    "1d": 86400, "1w": 604800, "1M": 2592000,  # mês aproximado em 30 dias
+}
 ALERT_CHECK_INTERVAL_SECONDS = 60  # cadência do monitor de alertas em segundo plano
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
@@ -300,12 +310,14 @@ def _series_points(times: List[int], values) -> List[dict]:
     return out
 
 
-def build_chart_payload(key: str, config: dict) -> dict:
+def build_chart_payload(key: str, config: dict, interval: str = "1h") -> dict:
     """Recalcula os indicadores sobre a série INTEIRA de candles (não só o
     último valor, como em CryptoAnalyzer.analyze_dataframe) para alimentar o
-    gráfico. Mesmas fórmulas de gorilatrader.py - mantenha os dois em sincronia
-    caso a estratégia mude."""
-    df = CryptoAnalyzer.fetch_klines(config["symbol"], config["exchange"], interval="1h", limit=250)
+    gráfico, no timeframe escolhido pelo seletor (`interval`) - isso é só
+    visualização, o sinal/score da barra lateral sempre usa o gráfico de 1h
+    (ver CryptoAnalyzer.analyze_asset). Mesmas fórmulas de gorilatrader.py -
+    mantenha os dois em sincronia caso a estratégia mude."""
+    df = CryptoAnalyzer.fetch_klines(config["symbol"], config["exchange"], interval=interval, limit=250)
     if df is None or len(df) < 50:
         raise HTTPException(status_code=502, detail=f"Sem dados disponíveis para {key}")
 
@@ -313,9 +325,11 @@ def build_chart_payload(key: str, config: dict) -> dict:
     times = (df["open_time"].astype("int64") // 1000).tolist()
 
     ema9 = c.ewm(span=9, adjust=False).mean()
+    ema14 = c.ewm(span=14, adjust=False).mean()
     ema21 = c.ewm(span=21, adjust=False).mean()
     ema50 = c.ewm(span=50, adjust=False).mean()
     ema200 = c.ewm(span=min(len(c), 200), adjust=False).mean()
+    volume_ma21 = v.rolling(21).mean()
 
     delta = c.diff()
     gain = delta.clip(lower=0)
@@ -347,7 +361,8 @@ def build_chart_payload(key: str, config: dict) -> dict:
 
     # A Nuvem de Ichimoku é projetada 26 períodos à frente do candle onde foi
     # calculada - por isso desloca-se o eixo do tempo, não os valores.
-    cloud_times = times[26:] + [times[-1] + BAR_SECONDS * i for i in range(1, 27)]
+    bar_seconds = INTERVAL_SECONDS.get(interval, 3600)
+    cloud_times = times[26:] + [times[-1] + bar_seconds * i for i in range(1, 27)]
 
     candles = [
         {"time": t, "open": float(op), "high": float(hi), "low": float(lo), "close": float(cl)}
@@ -362,9 +377,12 @@ def build_chart_payload(key: str, config: dict) -> dict:
         "key": key,
         "name": config["name"],
         "decimals": config["decimals"],
+        "interval": interval,
         "candles": candles,
         "volume": volume,
+        "volume_ma21": _series_points(times, volume_ma21),
         "ema9": _series_points(times, ema9),
+        "ema14": _series_points(times, ema14),
         "ema21": _series_points(times, ema21),
         "ema50": _series_points(times, ema50),
         "ema200": _series_points(times, ema200),
@@ -467,14 +485,16 @@ def api_remove_favorite(ticker: str, request: Request):
 
 
 @app.get("/api/chart/{key}")
-def api_chart(key: str, request: Request):
+def api_chart(key: str, request: Request, interval: str = "1h"):
     require_auth(request)
     key = key.upper()
+    if interval not in VALID_INTERVALS:
+        raise HTTPException(status_code=400, detail=f"Intervalo inválido: {interval}")
     cfg = resolve_asset_config(key)
     if cfg is None:
         raise HTTPException(status_code=404, detail="Ativo desconhecido")
     try:
-        return JSONResponse(build_chart_payload(key, cfg))
+        return JSONResponse(build_chart_payload(key, cfg, interval))
     except HTTPException:
         raise
     except Exception:
@@ -527,6 +547,10 @@ async def ws_updates(websocket: WebSocket, key: str):
         await websocket.close(code=4401)
         return
 
+    interval = websocket.query_params.get("interval", "1h")
+    if interval not in VALID_INTERVALS:
+        interval = "1h"
+
     key = key.upper()
     config = await asyncio.to_thread(resolve_asset_config, key)
     if config is None:
@@ -539,7 +563,7 @@ async def ws_updates(websocket: WebSocket, key: str):
         while True:
             chart, chart_error = None, None
             try:
-                chart = await asyncio.to_thread(build_chart_payload, key, config)
+                chart = await asyncio.to_thread(build_chart_payload, key, config, interval)
             except HTTPException as exc:
                 chart_error = exc.detail
             except Exception:
