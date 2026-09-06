@@ -211,6 +211,8 @@ Sobe um servidor local com um gráfico de candles em tempo real ([Lightweight Ch
 
 A aba do navegador usa o mesmo ícone pixel art do atalho de desktop (`gorilatrader.png`, servido em `/favicon.png`, sem precisar de login).
 
+**📱 Layout mobile**: em telas estreitas (celular) o cabeçalho vira um menu ☰ fechado por padrão - toque para abrir e cada ativo/ação (favoritos, "Modo Papel", "Sair") aparece em sua própria linha, sem cortar texto. O gráfico principal, o oscilador e os cartões da barra lateral empilham em uma única coluna, e as barras de timeframe/overlays viram uma faixa horizontal com rolagem (nenhum item some, só desliza) em vez de quebrar linha.
+
 **⭐ Favoritos na barra lateral**: digite qualquer ticker (ex.: `DOGE`) na caixa "Favoritos" e clique em "+" - o servidor resolve o símbolo (par USDT na Binance, decimais detectados pelo preço, mesmo mecanismo do `--assets` do terminal) e adiciona à lista. Clique num favorito pra trocar o gráfico pra ele.
 
 Diferente da v2.0, a lista de favoritos agora é **única e compartilhada do servidor** (persistida em `web_favorites.json`, não mais por navegador) - e favoritar um ticker o registra de verdade como ativo monitorado: a partir do próximo ciclo ele passa a tocar apito, mandar Telegram (se o sinal for FORTE) e abrir posição no modo papel, exatamente como um ativo do `config.json`. Desfavoritar para de monitorar (exceto os ativos que já vêm de `config.json`, esses nunca saem por aqui). Um ticker que não existe na Binance mostra um aviso e não é adicionado.

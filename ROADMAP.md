@@ -161,6 +161,16 @@ Este documento acompanha o que já foi entregue e o que está planejado para as 
 
 ---
 
+## ✅ v2.6 — Layout Mobile do Dashboard Web (entregue)
+
+- [x] **Menu ☰ fechado no celular**: o cabeçalho (abas de ativos, "📝 Modo Papel", "🚪 Sair") vira um menu hambúrguer em telas estreitas - fechado por padrão, abre em coluna com cada item ocupando uma linha inteira. No desktop/tablet o comportamento não muda em nada (mesmo cabeçalho de sempre, via `display:contents`)
+- [x] **Nenhum item cortado**: os itens do menu, favoritos e botões usam largura total e quebra de texto normal em vez de `white-space:nowrap`/overflow escondido - testado visualmente em 320px, 390px e desktop (1400px) sem clipping
+- [x] Grid principal (gráfico + barra lateral) empilha em coluna única no celular; gráfico e oscilador reduzem de altura pra caber na tela
+- [x] Barras de timeframe e de overlays (EMAs/Bollinger/Donchian/Ichimoku) viram uma faixa horizontal com rolagem no celular em vez de quebrar linha e espremer os botões
+- [x] Modal do "Modo Papel" e suas tabelas com padding/grid ajustados pra tela pequena (tabelas já tinham rolagem horizontal própria)
+
+---
+
 ## 🚧 Próximos Passos
 
 Nada planejado no momento - sugestões são bem-vindas.

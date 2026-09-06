@@ -53,6 +53,14 @@
   .header-btn{padding:6px 12px;border-radius:6px;background:var(--panel2);border:1px solid var(--border);color:var(--text);cursor:pointer;font-size:13px;font-weight:600;}
   .header-btn:hover{border-color:var(--cyan);}
 
+  /* No desktop/tablet o menu hamburguer some e header-actions vira "invisível"
+     pro layout (display:contents), então tabs/botões continuam fluindo direto
+     dentro do <header> exatamente como antes. Só no mobile (media query lá
+     embaixo) isso vira um menu fechado que abre em coluna. */
+  .menu-toggle{display:none;}
+  .header-actions{display:contents;}
+  .logout-form{margin:0;}
+
   .fav-add{display:flex;gap:6px;margin-bottom:10px;}
   .fav-add input{flex:1;min-width:0;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;}
   .fav-add button{background:var(--green);color:#04140c;border:none;border-radius:6px;padding:6px 12px;font-weight:700;cursor:pointer;font-size:14px;}
@@ -83,16 +91,60 @@
   .paper-table th,.paper-table td{padding:6px 8px;border-bottom:1px dashed var(--border);text-align:left;white-space:nowrap;}
   .paper-table th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;}
   .paper-table-wrap{overflow-x:auto;}
+
+  /* ---- Mobile (celular) ---- */
+  @media (max-width: 760px){
+    header{padding:8px 10px;gap:8px;}
+    header h1{font-size:14px;}
+    .status{font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+    /* Menu hamburguer: fechado por padrão; ao abrir vira uma coluna que empurra
+       o resto do header pra baixo (flex-wrap do header já cuida disso), com
+       cada item (aba de ativo ou botão) ocupando a largura toda - uma linha
+       cada, sem cortar texto. */
+    .menu-toggle{display:flex;align-items:center;justify-content:center;width:38px;height:34px;flex:0 0 auto;border-radius:6px;background:var(--panel2);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer;}
+    .menu-toggle:hover{border-color:var(--cyan);}
+    .header-actions{display:none;order:5;width:100%;flex-direction:column;align-items:stretch;gap:8px;margin-top:6px;}
+    .header-actions.open{display:flex;}
+    .header-actions .tabs{flex-direction:column;width:100%;gap:6px;}
+    .header-actions .tab{width:100%;box-sizing:border-box;text-align:center;padding:10px 12px;font-size:14px;white-space:normal;}
+    .header-actions .header-btn{width:100%;box-sizing:border-box;padding:10px 12px;font-size:14px;text-align:center;}
+    .header-actions .logout-form{width:100%;}
+    .header-actions .logout-form button{width:100%;}
+
+    main{grid-template-columns:1fr;padding:8px;gap:8px;}
+    #chart{height:300px;}
+    #osc{height:110px;}
+    .toolbar{gap:8px;padding:6px 8px;font-size:11px;}
+
+    /* Timeframe e overlays: em vez de quebrar linha e cortar/espremer os
+       botões, vira uma faixa horizontal com scroll - nenhum item some. */
+    #timeframeToolbar{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;}
+    #timeframeToolbar .tab{flex:0 0 auto;}
+    #overlayToolbar{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    #overlayToolbar label{flex:0 0 auto;white-space:nowrap;}
+
+    .card{padding:10px;}
+    .price{font-size:20px;}
+    .fav-list{max-height:140px;}
+
+    .modal{max-height:94vh;}
+    .modal-body{padding:12px;}
+    .paper-summary{grid-template-columns:1fr;}
+  }
 </style>
 </head>
 <body>
 
 <header>
   <h1><span class="gorilla">🦍</span>GorilaTrader Web</h1>
-  <div class="tabs" id="tabs"></div>
+  <button id="menuToggle" class="menu-toggle" aria-label="Abrir menu" aria-expanded="false" aria-controls="headerActions">☰</button>
+  <div class="header-actions" id="headerActions">
+    <div class="tabs" id="tabs"></div>
+    <button id="paperBtn" class="header-btn">📝 Modo Papel</button>
+    <form method="post" action="/logout" class="logout-form"><button type="submit" class="header-btn" title="Sair (se a autenticação estiver ativada)">🚪 Sair</button></form>
+  </div>
   <div class="spacer"></div>
-  <button id="paperBtn" class="header-btn">📝 Modo Papel</button>
-  <form method="post" action="/logout" style="margin:0"><button type="submit" class="header-btn" title="Sair (se a autenticação estiver ativada)">🚪 Sair</button></form>
   <div class="status" id="status">carregando…</div>
 </header>
 
@@ -411,6 +463,23 @@ function switchAsset(key) {
   lastChartData = null;
   shouldFitOnNextChart = true;
   connectWebSocket(key);
+  closeMobileMenu();
+}
+
+function closeMobileMenu() {
+  const el = document.getElementById('headerActions');
+  if (el) el.classList.remove('open');
+  const btn = document.getElementById('menuToggle');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function setupMobileMenu() {
+  const toggle = document.getElementById('menuToggle');
+  const actions = document.getElementById('headerActions');
+  toggle.addEventListener('click', () => {
+    const open = actions.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
 }
 
 function buildTimeframeToolbar() {
@@ -773,6 +842,7 @@ function setupPaperModal() {
   document.getElementById('paperBtn').addEventListener('click', () => {
     backdrop.classList.add('open');
     loadPaperTrading();
+    closeMobileMenu();
   });
   document.getElementById('paperCloseBtn').addEventListener('click', () => backdrop.classList.remove('open'));
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.classList.remove('open'); });
@@ -789,6 +859,7 @@ async function init() {
   buildCharts();
   setupFavoritesUI();
   setupPaperModal();
+  setupMobileMenu();
 
   document.getElementById('oscSelect').addEventListener('change', (e) => {
     oscMode = e.target.value;
