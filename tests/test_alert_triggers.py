@@ -22,6 +22,7 @@ def _build_terminal():
         telegram_chat_id="@canal",
         paper_trading_enabled=False,
     )
+    terminal.history_alerts = []  # isola o histórico pessoal persistido
     terminal.telegram.send = MagicMock()
     terminal.sound.play_buy_alert = MagicMock()
     terminal.sound.play_sell_alert = MagicMock()

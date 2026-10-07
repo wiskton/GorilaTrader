@@ -36,7 +36,7 @@ import requests
 from gorilatrader import API_URLS, CryptoAnalyzer, logger
 
 MAX_HOLDING_BARS_DEFAULT = 200  # ~8 dias em candles de 1h
-WARMUP_BARS_DEFAULT = 100  # candles antes de começar a gerar sinais (aquece EMAs/RSI/Ichimoku)
+WARMUP_BARS_DEFAULT = 200  # candles antes de começar a gerar sinais (aquece EMAs/RSI/Ichimoku)
 
 
 def fetch_extended_klines(symbol: str, exchange: str, total_candles: int, interval: str = "1h") -> pd.DataFrame:
@@ -103,6 +103,8 @@ class Trade:
     r_multiple: float = 0.0
     pct_return: float = 0.0
     bars_held: int = 0
+    fee_bps: float = 0.0
+    slippage_bps: float = 0.0
 
     def resolve(self, exit_idx: int, exit_price: float, outcome: str, df: pd.DataFrame):
         self.exit_idx = exit_idx
@@ -118,6 +120,12 @@ class Trade:
         else:
             self.r_multiple = (self.entry_price - self.exit_price) / risk
             self.pct_return = (self.entry_price / self.exit_price - 1) * 100
+
+        # Custos nas duas pernas, normalizados pelo capital da entrada.
+        cost = (self.entry_price + self.exit_price) * (self.fee_bps + self.slippage_bps) / 10000
+        gross = (self.exit_price - self.entry_price) * (1 if self.direction == "COMPRA" else -1)
+        self.r_multiple = (gross - cost) / risk
+        self.pct_return = (gross - cost) / self.entry_price * 100
 
 
 def _resolve_trade(df: pd.DataFrame, trade: Trade, max_holding_bars: int) -> None:
@@ -160,6 +168,8 @@ def simulate(
     weights: Optional[dict] = None,
     warmup: int = WARMUP_BARS_DEFAULT,
     max_holding_bars: int = MAX_HOLDING_BARS_DEFAULT,
+    fee_bps: float = 10.0,
+    slippage_bps: float = 5.0,
 ) -> List[Trade]:
     """Percorre o histórico barra a barra gerando sinais sem look-ahead
     (cada sinal só vê candles até aquele ponto) e simula a entrada/saída de
@@ -171,6 +181,8 @@ def simulate(
     "no passado" (antes da posição anterior sequer ter fechado em tempo
     simulado), o que não faz sentido para uma conta com uma posição por vez.
     """
+    if fee_bps < 0 or slippage_bps < 0:
+        raise ValueError("Custos não podem ser negativos")
     trades: List[Trade] = []
     last_signal: Optional[str] = None
     n = len(df)
@@ -197,6 +209,8 @@ def simulate(
                 sl=item.stop_loss,
                 tp1=item.take_profit_1,
                 tp2=item.take_profit_2,
+                fee_bps=fee_bps,
+                slippage_bps=slippage_bps,
             )
             _resolve_trade(df, trade, max_holding_bars)
             trades.append(trade)
@@ -224,8 +238,8 @@ def summarize(trades: List[Trade]) -> Dict[str, dict]:
         if not ts:
             summary[name] = {"trades": 0}
             continue
-        wins = [t for t in ts if t.outcome in WIN_OUTCOMES]
-        losses = [t for t in ts if t.outcome in LOSS_OUTCOMES]
+        wins = [t for t in ts if t.pct_return > 0]
+        losses = [t for t in ts if t.pct_return < 0]
         by_outcome: Dict[str, int] = {}
         for t in ts:
             by_outcome[t.outcome] = by_outcome.get(t.outcome, 0) + 1
@@ -288,6 +302,7 @@ def print_backtest_report(console, key: str, config: dict, trades: List[Trade], 
             f"soma de R [bold]{s['total_r']:+.2f}[/bold] · retorno médio [bold]{s['avg_pct']:+.2f}%[/bold] "
             f"· {s['avg_bars_held']:.0f}h em média\n[dim]{outcomes}[/dim]",
         )
+    console.print("[dim]Retornos líquidos dos custos estimados; não incluem funding. Acerto = retorno positivo.[/dim]")
     console.print(Panel(header, title=f"[bold]📊 Backtest {key} - Resumo[/bold]", border_style="cyan"))
 
     if not trades:

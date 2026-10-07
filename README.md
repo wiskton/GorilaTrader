@@ -284,7 +284,7 @@ python3 gorilatrader.py --backtest ETH --backtest-days 90
 
 Mostra taxa de acerto, R médio (retorno normalizado pelo risco) e retorno % por direção (COMPRA/VENDA), além da lista das últimas entradas com preço/resultado. Útil para comparar diferentes `weights` em `config.json` antes de usar em conta real - o backtest já lê os pesos configurados.
 
-⚠️ É uma ferramenta de análise histórica, não uma promessa de resultado futuro - custos de execução (spread, slippage, taxas) não são simulados.
+⚠️ É uma ferramenta de análise histórica, não uma promessa de resultado futuro - O backtest estima 10 bps de taxa e 5 bps de slippage por perna; funding não está incluído. Esses valores são hipóteses, não taxas consultadas da sua conta.
 
 ---
 
@@ -361,3 +361,59 @@ Confira o [ROADMAP.md](ROADMAP.md) para ver o que já foi entregue e o que está
 ---
 
 *Nota de Gestão de Risco: O mercado de criptomoedas opera 24/7 com alta volatilidade. Nunca arrisque mais de 1% a 2% do seu capital total por operação. Este projeto é uma ferramenta de apoio à decisão e não constitui recomendação de investimento.*
+
+
+## Filtros quantitativos de entrada
+
+O score indica viés técnico, **não probabilidade de acerto**. Por padrão,
+o sinal só permite entrada com pelo menos 200 candles, ADX >= 20,
+EMA21/50 e preço/EMA200 na direção da operação, volume relativo >= 0,8x,
+preço a até 2,5 ATR da EMA21 e RSI sem exaustão (>75 para compra ou <25
+para venda). Um timeframe maior contrário também bloqueia a entrada.
+Quando bloqueado, o sinal fica NEUTRO e os motivos aparecem no terminal
+e na web; o score mantém o viés para distinguir tendência de oportunidade.
+Se a confirmação maior estiver indisponível, ela não veta a operação.
+
+A análise ao vivo utiliza candles fechados; preço de sinal e níveis referem-se
+a esse fechamento, não a uma cotação de execução. ADX e limites de entrada
+são heurísticas iniciais, ainda sem calibração fora da amostra. Em Python,
+`entry_filters=False` permite comparar a matriz original com os novos filtros.
+
+O backtest agora conta acerto pelo retorno líquido positivo, inclusive nos
+timeouts, e desconta custos estimados em ambas as pernas. `simulate` aceita
+`fee_bps` e `slippage_bps` por perna (padrões 10 e 5). O modo papel mantém
+sua contabilização anterior, sem esses custos. Compare períodos posteriores
+ao desenvolvimento e retorno médio em R antes de concluir que houve melhora;
+a suite automatizada verifica a lógica, não rentabilidade. A confirmação
+multitemporal ainda não é reconstruída no backtest, portanto ele não reproduz
+todos os filtros do monitor ao vivo.
+
+
+## Inteligência de Entrada, Assertividade e Melhores Horários
+
+O GorilaTrader agora inclui um motor de inteligência de entrada para elevar a assertividade das operações e orientar o trader no timing exato:
+
+1. **Probabilidade Estimada de Acerto (`win_probability` %)**:
+   - Modela matematicamente a probabilidade da operação com base em confluência técnica, força da tendência (ADX), confirmação do timeframe maior (4h), volume relativo institucional, proximidade à média (pullback vs preço esticado) e sessão de mercado.
+   - Classificação de assertividade:
+     - **ALTA ASSERTIVIDADE (≥ 70%)**: Cenários de máxima confluência, tendência forte e entrada perto da média.
+     - **MÉDIA-ALTA (60% - 69%)**: Cenário favorável com bom alinhamento.
+     - **MÉDIA (50% - 59%)**: Zona neutra / consolidação.
+     - **BAIXA / ALTO RISCO (< 50%)**: Operações com bloqueios quantitativos ou mercado lateral (risco elevado de stop).
+
+2. **Melhor Momento para Entrar na Operação (`optimal_entry_timing`)**:
+   - Avisa em tempo real a melhor ação:
+     - `MOMENTO IDEAL`: Pullback na EMA21 ou reteste com confluência de alta probabilidade.
+     - `AGUARDAR RETRAÇÃO`: Preço esticado longe da média; orienta posicionamento de ordens limite na média.
+     - `AGUARDAR ROMPIMENTO`: Mercado lateral (ADX < 20); evita falsos rompimentos.
+     - `AGUARDAR VOLUME`: Falta de fluxo negociado.
+
+3. **Zona Ideal de Preço (`best_entry_zone`)**:
+   - Faixa de preço calculada dinamicamente onde a relação risco/retorno é ótima (ex: `$85.200 - $85.600`).
+
+4. **Melhores Horários para Operar (`best_time_window` & `last_best_entry`)**:
+   - **Janela Estatística**: Identifica as sessões institucionais de maior volume e liquidez sustentada (ex: `10:00 - 15:00 BRT - Sessão NY / Abertura de Wall St` e `04:00 - 08:00 BRT - Sessão Londres`).
+   - **Sessão Atual**: Informa o regime de liquidez do momento (Sessão NY, Londres, Ásia ou Transição).
+   - **Melhor Horário Recente**: Analisa os candles históricos recentes e aponta o melhor momento em que ocorreu uma entrada institucional no ciclo.
+
+Todas essas informações estão integradas na **API WebSocket / REST**, no **painel web** com barra visual de assertividade e nos alertas emitidos via **Telegram**.

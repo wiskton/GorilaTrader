@@ -77,6 +77,8 @@ def test_resolve_asset_config_returns_none_when_symbol_not_found():
 
 
 def test_resolve_asset_config_caches_new_asset_across_calls():
+    webserver.ASSETS.pop("DOGE", None)
+    webserver._extra_assets_cache.pop("DOGE", None)
     with patch("gorilatrader.requests.get", return_value=_binance_response(0.08)) as mock_get:
         webserver.resolve_asset_config("doge")
         webserver.resolve_asset_config("doge")

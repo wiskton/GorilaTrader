@@ -12,7 +12,7 @@ from tests.conftest import build_df
 
 def test_strong_uptrend_classifies_as_buy_signal():
     df = build_df(prefix_n=200, tail_steps=[0.006] * 40)
-    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS)
+    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS, entry_filters=False)
     assert item is not None
     assert "COMPRA" in item.signal
     assert item.score > 0
@@ -20,7 +20,7 @@ def test_strong_uptrend_classifies_as_buy_signal():
 
 def test_strong_downtrend_classifies_as_sell_signal():
     df = build_df(prefix_n=200, tail_steps=[-0.006] * 40)
-    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS)
+    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS, entry_filters=False)
     assert item is not None
     assert "VENDA" in item.signal
     assert item.score < 0
@@ -37,14 +37,14 @@ def test_score_is_clipped_to_valid_range():
 
 def test_stop_loss_and_take_profit_direction_for_buy():
     df = build_df(prefix_n=200, tail_steps=[0.006] * 40)
-    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS)
+    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS, entry_filters=False)
     assert item is not None and "COMPRA" in item.signal
     assert item.stop_loss < item.price < item.take_profit_1 < item.take_profit_2
 
 
 def test_stop_loss_and_take_profit_direction_for_sell():
     df = build_df(prefix_n=200, tail_steps=[-0.006] * 40)
-    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS)
+    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS, entry_filters=False)
     assert item is not None and "VENDA" in item.signal
     assert item.take_profit_2 < item.take_profit_1 < item.price < item.stop_loss
 
@@ -71,7 +71,7 @@ def test_ema200_uses_full_200_period_span():
     para o span=200 completo - este teste confere que analyze_dataframe usa
     o span correto (min(len, 200)) e não um valor menor arbitrário."""
     df = build_df(prefix_n=200, tail_steps=[0.006] * 40)  # n = 240
-    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS)
+    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS, entry_filters=False)
     assert item is not None
 
     expected_span = min(len(df), 200)
@@ -88,5 +88,5 @@ def test_ema200_uses_full_200_period_span():
 
 def test_analyze_dataframe_returns_none_for_insufficient_data():
     df = build_df(prefix_n=10, tail_steps=[0.01] * 5)  # só 15 candles, mínimo é 50
-    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS)
+    item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, DEFAULT_WEIGHTS, entry_filters=False)
     assert item is None

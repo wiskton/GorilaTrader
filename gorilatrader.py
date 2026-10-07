@@ -22,7 +22,7 @@ import time
 import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -603,6 +603,16 @@ class MarketData:
     take_profit_1: float
     take_profit_2: float
     reasons: List[str]
+    adx: float = 0.0
+    market_regime: str = "INDEFINIDO"
+    entry_blockers: List[str] = field(default_factory=list)
+    win_probability: float = 50.0
+    assertiveness_label: str = "NEUTRO"
+    best_entry_zone: str = "—"
+    optimal_entry_timing: str = "—"
+    best_time_window: str = "10:00 - 15:00 BRT (Sessão NY)"
+    current_session: str = "—"
+    last_best_entry: str = "—"
     timestamp: datetime = field(default_factory=datetime.now)
 
 
@@ -742,15 +752,224 @@ class CryptoAnalyzer:
         cls._mtf_cache[cache_key] = (now, df)
         return df
 
+    @staticmethod
+    def closed_candles(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+        """Somente para feeds ao vivo; históricos fornecidos ao backtest já são fechados."""
+        if df is None or df.empty:
+            return df
+        if "close_time" in df:
+            return df.loc[pd.to_numeric(df["close_time"]) < time.time() * 1000].copy()
+        if "confirm" in df:
+            return df.loc[df["confirm"].astype(str) == "1"].copy()
+        # Bybit/Kraken incluem a última barra em formação.
+        return df.iloc[:-1].copy()
+
+    @staticmethod
+    def _fmt_price_static(val: float, dec: int = 2) -> str:
+        if val >= 1.0:
+            return f"{val:,.{dec}f}"
+        return f"{val:.6f}".rstrip("0").rstrip(".")
+
+    @classmethod
+    def compute_entry_intelligence(
+        cls,
+        df: pd.DataFrame,
+        price: float,
+        signal: str,
+        score: int,
+        adx: float,
+        market_regime: str,
+        blockers: List[str],
+        atr: float,
+        e9: float,
+        e21: float,
+        e50: float,
+        e200: float,
+        current_vol_ratio: float,
+        mtf_bias: Optional[str],
+        rsi: float,
+        decimals: int = 2,
+    ) -> dict:
+        # Sessão atual em BRT (UTC-3)
+        now_brt = datetime.now(timezone.utc) - timedelta(hours=3)
+        h = now_brt.hour
+        if 10 <= h < 16:
+            current_session = "Sessão Nova York (Pico de Liquidez)"
+            session_boost = 4.0
+        elif 4 <= h < 9:
+            current_session = "Sessão Londres (Volume Europeu)"
+            session_boost = 3.0
+        elif h >= 21 or h < 3:
+            current_session = "Sessão Asiática (Liquidez Moderada)"
+            session_boost = -2.0
+        else:
+            current_session = "Transição / Baixa Liquidez"
+            session_boost = -4.0
+
+        best_time_window = "10:00 - 15:00 BRT (Sessão NY - Maior Liquidez & Volume)"
+
+        # Localização da última melhor entrada recente no histórico de candles (até 72 horas)
+        last_best_entry = "Aguardando novo ciclo de confluência"
+        if df is not None and len(df) >= 10 and "open_time" in df:
+            try:
+                c = df["close"]
+                hist_e21 = c.ewm(span=21, adjust=False).mean()
+                hist_vma = df["vol"].rolling(20).mean().replace(0, 1)
+                hist_vr = df["vol"] / hist_vma
+                best_cand = None
+                best_metric = -999.0
+                scan_start = max(0, len(df) - 72)
+                for i in range(scan_start, len(df) - 1):
+                    row = df.iloc[i]
+                    c_close = float(row["close"])
+                    c_e21 = float(hist_e21.iloc[i])
+                    vr = float(hist_vr.iloc[i])
+                    dist = abs(c_close - c_e21) / max(c_e21, 1e-9)
+                    metric = vr - (dist * 40.0)
+                    if vr >= 1.1 and dist <= 0.015 and metric > best_metric:
+                        best_metric = metric
+                        best_cand = row
+                if best_cand is not None:
+                    ts = int(best_cand["open_time"])
+                    cand_dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc) - timedelta(hours=3)
+                    p_cand = float(best_cand["close"])
+                    p_fmt = cls._fmt_price_static(p_cand, decimals)
+                    last_best_entry = f"{cand_dt.strftime('%d/%m às %H:%M')} BRT (${p_fmt})"
+            except Exception:
+                pass
+
+        # Cálculo da probabilidade de acerto (Win Probability)
+        prob = 50.0
+        is_buy = "COMPRA" in signal
+        is_sell = "VENDA" in signal
+        direction = 1 if is_buy else (-1 if is_sell else (1 if score > 0 else -1))
+
+        # 1. Confluência do score técnico
+        abs_score = abs(score)
+        if abs_score >= 70:
+            prob += 16.0
+        elif abs_score >= 50:
+            prob += 12.0
+        elif abs_score >= 25:
+            prob += 6.0
+        else:
+            prob += (abs_score / 25.0) * 4.0
+
+        # 2. ADX e regime de tendência
+        if adx >= 28:
+            prob += 7.0
+        elif adx >= 20:
+            prob += 4.0
+        else:
+            prob -= 12.0
+
+        # 3. Confirmação do timeframe maior (4h)
+        if mtf_bias is not None:
+            expected_mtf = "ALTA" if direction > 0 else "BAIXA"
+            if mtf_bias == expected_mtf:
+                prob += 8.0
+            else:
+                prob -= 14.0
+
+        # 4. Volume relativo
+        if current_vol_ratio >= 1.5:
+            prob += 6.0
+        elif current_vol_ratio >= 1.0:
+            prob += 3.0
+        elif current_vol_ratio < 0.8:
+            prob -= 8.0
+
+        # 5. Distância das médias móveis (Pullback vs Preço Esticado)
+        dist_e21 = abs(price - e21)
+        if atr > 0:
+            atr_dist = dist_e21 / atr
+            if atr_dist <= 0.8:
+                prob += 6.0  # Pullback ideal
+            elif atr_dist <= 1.5:
+                prob += 2.0
+            elif atr_dist > 2.5:
+                prob -= 14.0
+
+        # 6. Sessão institucional
+        prob += session_boost
+
+        # 7. Filtros bloqueadores
+        if blockers:
+            prob = min(prob - 18.0, 42.0)
+        elif signal == "NEUTRO" and abs_score < 25:
+            prob = min(prob, 50.0)
+
+        win_prob = round(float(np.clip(prob, 18.0, 88.0)), 1)
+
+        # Classificação de Assertividade
+        if win_prob >= 72.0:
+            assertiveness_label = "ALTA ASSERTIVIDADE"
+        elif win_prob >= 60.0:
+            assertiveness_label = "MÉDIA-ALTA ASSERTIVIDADE"
+        elif win_prob >= 50.0:
+            assertiveness_label = "MÉDIA (Zona Neutra)"
+        else:
+            assertiveness_label = "BAIXA (Alto Risco / Aguardar)"
+
+        # Timing ótimo de entrada
+        p_str_e21 = cls._fmt_price_static(e21, decimals)
+        if blockers:
+            if any("ADX abaixo de 20" in b for b in blockers):
+                optimal_entry_timing = "AGUARDAR ROMPIMENTO: Mercado lateral (ADX < 20). Risco de falso rompimento."
+            elif any("Preço esticado" in b for b in blockers):
+                optimal_entry_timing = f"AGUARDAR RETRAÇÃO: Preço esticado da média. Aguarde pullback na EMA21 (${p_str_e21})."
+            elif any("Volume relativo insuficiente" in b for b in blockers):
+                optimal_entry_timing = "AGUARDAR VOLUME INSTITUCIONAL: Falta fluxo comprador/vendedor para sustentar o movimento."
+            elif any("Timeframe maior contrário" in b for b in blockers):
+                optimal_entry_timing = "AGUARDAR ALINHAMENTO: Gráfico de 4h diverge do 1h. Evite operar contra o 4h."
+            else:
+                optimal_entry_timing = f"AGUARDAR CONDIÇÕES: {blockers[0]}"
+        elif is_buy:
+            if atr > 0 and abs(price - e21) <= 1.0 * atr:
+                optimal_entry_timing = "MOMENTO IDEAL: Pullback na EMA21 com confirmação de tendência. Entrada autorizada!"
+            else:
+                optimal_entry_timing = f"MOMENTO FAVORÁVEL: Tendência de alta. Melhor entrada com ordem limite na EMA21 (${p_str_e21})."
+        elif is_sell:
+            if atr > 0 and abs(price - e21) <= 1.0 * atr:
+                optimal_entry_timing = "MOMENTO IDEAL: Reteste na EMA21 com rejeição de topo. Entrada vendida autorizada!"
+            else:
+                optimal_entry_timing = f"MOMENTO FAVORÁVEL: Tendência de baixa. Melhor entrada com ordem limite na EMA21 (${p_str_e21})."
+        else:
+            optimal_entry_timing = "AGUARDAR FORMAÇÃO: Mercado em consolidação técnica. Aguardar gatilho direcional."
+
+        # Zona Ideal de Preço
+        safe_half_atr = max(atr * 0.25, price * 0.002)
+        if is_buy or (signal == "NEUTRO" and score > 0):
+            z_low = cls._fmt_price_static(min(price, e21 - safe_half_atr), decimals)
+            z_high = cls._fmt_price_static(max(e21 + safe_half_atr, e9), decimals)
+            best_entry_zone = f"${z_low} - ${z_high} (Pullback EMA21)"
+        elif is_sell or (signal == "NEUTRO" and score < 0):
+            z_low = cls._fmt_price_static(min(e9, e21 - safe_half_atr), decimals)
+            z_high = cls._fmt_price_static(max(price, e21 + safe_half_atr), decimals)
+            best_entry_zone = f"${z_low} - ${z_high} (Reteste EMA21)"
+        else:
+            best_entry_zone = f"${p_str_e21} (Média EMA21)"
+
+        return {
+            "win_probability": win_prob,
+            "assertiveness_label": assertiveness_label,
+            "best_entry_zone": best_entry_zone,
+            "optimal_entry_timing": optimal_entry_timing,
+            "best_time_window": best_time_window,
+            "current_session": current_session,
+            "last_best_entry": last_best_entry,
+        }
+
     @classmethod
     def analyze_asset(cls, key: str, config: dict, weights: Optional[dict] = None) -> Optional[MarketData]:
         df = cls.fetch_klines(config["symbol"], config["exchange"], interval=TIMEFRAME, limit=250)
         if df is None or len(df) < 50:
             logger.warning("Dados insuficientes para %s (%s candles)", key, 0 if df is None else len(df))
             return None
+        df = cls.closed_candles(df)
         mtf_interval = MTF_TIMEFRAME_MAP.get(TIMEFRAME, "4h")
         mtf_df = cls.fetch_mtf_klines(config["symbol"], config["exchange"], interval=mtf_interval, limit=120)
-        return cls.analyze_dataframe(key, config, df, weights, mtf_df=mtf_df)
+        return cls.analyze_dataframe(key, config, df, weights, mtf_df=cls.closed_candles(mtf_df))
 
     @classmethod
     def analyze_dataframe(
@@ -760,6 +979,7 @@ class CryptoAnalyzer:
         df: pd.DataFrame,
         weights: Optional[dict] = None,
         mtf_df: Optional[pd.DataFrame] = None,
+        entry_filters: bool = True,
     ) -> Optional[MarketData]:
         """Calcula os indicadores e a matriz de confluência a partir de um
         DataFrame de candles já carregado (separado de analyze_asset para
@@ -1048,10 +1268,10 @@ class CryptoAnalyzer:
             mtf_label = MTF_TIMEFRAME_MAP.get(TIMEFRAME, "4h")
             main_label = TIMEFRAME
             if local_bias == mtf_bias:
-                score += w["mtf_confirmation"]
+                score += w["mtf_confirmation"] * (1 if local_bias == "ALTA" else -1)
                 reasons.append(f"Tendência de {mtf_label} ({mtf_bias.lower()}) confirma o viés de {main_label}")
             else:
-                score -= w["mtf_confirmation"]
+                score -= w["mtf_confirmation"] * (1 if local_bias == "ALTA" else -1)
                 reasons.append(f"Tendência de {mtf_label} ({mtf_bias.lower()}) diverge do {main_label} - contra a tendência maior")
 
         # Normaliza pontuação
@@ -1068,6 +1288,40 @@ class CryptoAnalyzer:
             signal = "VENDA"
         else:
             signal = "NEUTRO"
+
+        # ADX de Wilder: mede força, sem contar novamente a direção das EMAs.
+        true_range = pd.concat([h - l, (h - c.shift()).abs(),
+                                (l - c.shift()).abs()], axis=1).max(axis=1)
+        up, down = h.diff(), -l.diff()
+        plus_dm = up.where((up > down) & (up > 0), 0.0)
+        minus_dm = down.where((down > up) & (down > 0), 0.0)
+        smooth_tr = true_range.ewm(alpha=1/14, adjust=False).mean()
+        plus_di = 100 * plus_dm.ewm(alpha=1/14, adjust=False).mean() / smooth_tr.clip(lower=1e-12)
+        minus_di = 100 * minus_dm.ewm(alpha=1/14, adjust=False).mean() / smooth_tr.clip(lower=1e-12)
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).clip(lower=1e-12)
+        adx = float(dx.ewm(alpha=1/14, adjust=False).mean().iloc[-1])
+        regime = "TENDÊNCIA" if adx >= 20 else "LATERAL"
+        blockers = []
+        if signal != "NEUTRO" and entry_filters:
+            direction = 1 if "COMPRA" in signal else -1
+            if len(df) < 200:
+                blockers.append("Histórico inferior a 200 candles: EMA200 sem aquecimento")
+            if adx < 20:
+                blockers.append("Mercado lateral: ADX abaixo de 20")
+            if direction * (e21 - e50) <= 0 or direction * (price - e200) <= 0:
+                blockers.append("Entrada contrária à estrutura EMA21/50/200")
+            if mtf_bias is not None and mtf_bias != ("ALTA" if direction > 0 else "BAIXA"):
+                blockers.append("Timeframe maior contrário à entrada")
+            if current_vol_ratio < 0.8:
+                blockers.append("Volume relativo insuficiente (abaixo de 0,8x)")
+            if atr <= 0 or abs(price - e21) > 2.5 * atr:
+                blockers.append("Preço esticado: aguardar aproximação da EMA21")
+            if (direction > 0 and rsi > 75) or (direction < 0 and rsi < 25):
+                blockers.append("Momentum extremo: risco de entrada tardia")
+            if blockers:
+                signal = "NEUTRO"
+                reasons.extend("AGUARDAR: " + reason for reason in blockers)
+        reasons.append(f"Regime {regime.lower()} | ADX {adx:.1f}; score não é probabilidade")
 
         # Gerenciamento de Risco (Stop Loss & Take Profits com ATR)
         safe_atr = max(atr, price * 0.005)
@@ -1089,6 +1343,26 @@ class CryptoAnalyzer:
             sl = price + (1.5 * safe_atr)
             tp1 = price - (2.0 * safe_atr)
             tp2 = price - (3.5 * safe_atr)
+
+        entry_intel = cls.compute_entry_intelligence(
+            df=df,
+            price=price,
+            signal=signal,
+            score=score,
+            adx=adx,
+            market_regime=regime,
+            blockers=blockers,
+            atr=atr,
+            e9=e9,
+            e21=e21,
+            e50=e50,
+            e200=e200,
+            current_vol_ratio=current_vol_ratio,
+            mtf_bias=mtf_bias,
+            rsi=rsi,
+            decimals=config.get("decimals", 2),
+        )
+        reasons.append(f"Assertividade {entry_intel['assertiveness_label']} ({entry_intel['win_probability']}%) · {entry_intel['optimal_entry_timing']}")
 
         return MarketData(
             asset_key=key,
@@ -1129,6 +1403,16 @@ class CryptoAnalyzer:
             take_profit_1=tp1,
             take_profit_2=tp2,
             reasons=reasons,
+            adx=adx,
+            market_regime=regime,
+            entry_blockers=blockers,
+            win_probability=entry_intel["win_probability"],
+            assertiveness_label=entry_intel["assertiveness_label"],
+            best_entry_zone=entry_intel["best_entry_zone"],
+            optimal_entry_timing=entry_intel["optimal_entry_timing"],
+            best_time_window=entry_intel["best_time_window"],
+            current_session=entry_intel["current_session"],
+            last_best_entry=entry_intel["last_best_entry"],
         )
 
 
@@ -1466,14 +1750,26 @@ class GorilaTraderTerminal:
             return
 
         emoji = "🟢" if bullish else "🔴"
+        win_prob = getattr(item, "win_probability", None)
+        prob_str = f" · <b>Assertividade: {win_prob:.1f}%</b>" if win_prob is not None else ""
+        zone = getattr(item, "best_entry_zone", None)
+        zone_str = f"Zona Ideal: {html.escape(zone)}\n" if zone and zone != "—" else ""
+        timing = getattr(item, "optimal_entry_timing", None)
+        timing_str = f"Timing: {html.escape(timing)}\n" if timing and timing != "—" else ""
+        window = getattr(item, "best_time_window", None)
+        window_str = f"Melhor Horário: {html.escape(window)}\n" if window and window != "—" else ""
+
         # Telegram usa parse_mode HTML: qualquer "<"/">" vindo de texto dinâmico
         # (ex.: fatores técnicos como "Preço < EMA9 < EMA21") é interpretado como
         # tag e derruba a mensagem inteira ("can't parse entities") - escapa tudo
         # que não é a tag literal do próprio template (<b>...</b>).
         text = (
             f"{emoji} <b>GorilaTrader</b> · {ASSETS[key]['icon']} <b>{html.escape(key)}</b>\n"
-            f"{html.escape(label)}\n"
+            f"{html.escape(label)}{prob_str}\n"
             f"Preço: {html.escape(p_str)}\n"
+            f"{zone_str}"
+            f"{timing_str}"
+            f"{window_str}"
             f"{html.escape(detail)}\n"
             f"🕒 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
         )

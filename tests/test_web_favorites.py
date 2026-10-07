@@ -28,6 +28,10 @@ def _isolate_favorites_state(tmp_path, monkeypatch):
     monkeypatch.setattr(webserver, "FAVORITES_PATH", str(tmp_path / "web_favorites.json"))
     original_assets = dict(webserver.ASSETS)
     original_favorites = set(webserver._favorite_tickers)
+    for t in original_favorites:
+        webserver.ASSETS.pop(t, None)
+    webserver._favorite_tickers.clear()
+    webserver._extra_assets_cache.clear()
     yield
     webserver.ASSETS.clear()
     webserver.ASSETS.update(original_assets)

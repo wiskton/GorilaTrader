@@ -44,20 +44,20 @@ def test_misaligned_bullish_1h_against_bearish_4h_subtracts_score():
     assert any("diverge do 1h" in r for r in item.reasons)
 
 
-def test_aligned_bearish_adds_score():
+def test_aligned_bearish_reinforces_sell_score():
     df = build_df(**LOCAL_BEAR)
     mtf_df = build_df(**MTF_BAIXA)
     item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, _weights(10), mtf_df=mtf_df)
     assert item is not None
-    assert item.score == 10
+    assert item.score == -10
 
 
-def test_misaligned_bearish_subtracts_score():
+def test_misaligned_bearish_offsets_sell_score():
     df = build_df(**LOCAL_BEAR)
     mtf_df = build_df(**MTF_ALTA)
     item = CryptoAnalyzer.analyze_dataframe("TEST", ASSETS["BTC"], df, _weights(10), mtf_df=mtf_df)
     assert item is not None
-    assert item.score == -10
+    assert item.score == 10
 
 
 def test_missing_mtf_df_contributes_nothing():
